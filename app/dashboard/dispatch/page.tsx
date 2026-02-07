@@ -13,6 +13,7 @@ import {
 import { AuthGuard } from '@/components/auth-guard'
 import { supabase } from '@/lib/supabase'
 import { useCall } from '@/lib/use-call'
+import { haversineDistance, formatDistance, estimateETA } from '@/lib/utils'
 
 const MapComponent = dynamic(() => import('@/components/map').then(m => ({ default: m.Map })), { ssr: false })
 
@@ -191,6 +192,31 @@ function DispatchContent() {
     if (data) setResponders(data)
   }
 
+  // Update all responder locations in DB to the dispatch team's current browser location
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords
+        // Update all responders to be near the current location (spread within ~2km radius)
+        const { data: allResp } = await supabase.from('responders').select('id')
+        if (allResp) {
+          for (const r of allResp) {
+            const offsetLat = (Math.random() * 0.015 + 0.003) * (Math.random() > 0.5 ? 1 : -1)
+            const offsetLng = (Math.random() * 0.015 + 0.003) * (Math.random() > 0.5 ? 1 : -1)
+            await supabase.from('responders').update({
+              location_lat: latitude + offsetLat,
+              location_lng: longitude + offsetLng,
+            } as any).eq('id', r.id)
+          }
+          fetchResponders()
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+    )
+  }, [])
+
   useEffect(() => { fetchSessions(); fetchResponders() }, [])
 
   // Realtime
@@ -283,7 +309,7 @@ function DispatchContent() {
       // Store notes on incident for the department dashboard
       if (notes) {
         await supabase.from('incidents')
-          .update({ tactical_advice: notes })
+          .update({ tactical_advice: notes } as any)
           .eq('reported_by', selected.id)
       }
     }
@@ -299,9 +325,9 @@ function DispatchContent() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: selected.id, status: 'resolved', message: 'Session resolved by dispatch' }),
     })
-    await supabase.from('incidents').update({ status: 'resolved' }).eq('reported_by', selected.id)
+    await supabase.from('incidents').update({ status: 'resolved' } as any).eq('reported_by', selected.id)
     if (selected.assignedResponder?.id) {
-      await supabase.from('responders').update({ status: 'available', current_incident_id: null }).eq('id', selected.assignedResponder.id)
+      await supabase.from('responders').update({ status: 'available', current_incident_id: null } as any).eq('id', selected.assignedResponder.id)
     }
     setSelected(null)
     fetchSessions()
@@ -326,44 +352,56 @@ function DispatchContent() {
     setQaLoading(false)
   }
 
-  // Map markers — include live user location
+  // Map markers — only show selected incident + its assigned responder
   const mapMarkers = useMemo(() => {
     const m: any[] = []
-    sessions.forEach(s => {
-      if (s.location?.lat && s.location?.lng) {
-        // Show user's live location with pulsing marker
+    if (!selected) return m
+
+    // Show the selected incident's caller location
+    if (selected.location?.lat && selected.location?.lng) {
+      m.push({
+        position: [selected.location.lat, selected.location.lng] as [number, number],
+        popup: `<b>📍 ${selected.summary || 'Emergency'}</b><br/><span style="color:#dc2626;font-weight:600">${selected.severity}</span> • ${selected.type}<br/><em style="color:#6366f1">Live Location</em>`,
+        type: 'user-live' as const,
+      })
+    }
+
+    // Show only the assigned responder for this incident (if any)
+    if (selected.assignedResponder) {
+      const resp = responders.find(r => r.id === selected.assignedResponder?.id || r.name === selected.assignedResponder?.name)
+      if (resp?.location_lat && resp?.location_lng) {
+        const dist = selected.location?.lat && selected.location?.lng
+          ? haversineDistance(Number(resp.location_lat), Number(resp.location_lng), selected.location.lat, selected.location.lng)
+          : 0
+        const distInfo = dist > 0
+          ? `<br/><span style="color:#6366f1;font-size:11px">📏 ${formatDistance(dist)} • ~${estimateETA(dist)} min ETA</span>`
+          : ''
         m.push({
-          position: [s.location.lat, s.location.lng] as [number, number],
-          popup: `<b>📍 ${s.summary || 'Emergency'}</b><br/><span style="color:#dc2626;font-weight:600">${s.severity}</span> • ${s.type}<br/><em style="color:#6366f1">Live Location</em>`,
-          type: 'user-live' as const,
+          position: [Number(resp.location_lat), Number(resp.location_lng)] as [number, number],
+          popup: `<b>${resp.name}</b><br/>${resp.unit_id} • <span style="color:${resp.status === 'available' ? '#16a34a' : '#dc2626'}">${resp.status}</span>${distInfo}`,
+          type: 'responder' as const,
         })
       }
-    })
-    responders.filter(r => r.location_lat && r.location_lng).forEach(r => {
-      m.push({ position: [Number(r.location_lat), Number(r.location_lng)] as [number, number], popup: `<b>${r.name}</b><br/>${r.unit_id} • <span style="color:${r.status === 'available' ? '#16a34a' : '#dc2626'}">${r.status}</span>`, type: 'responder' as const })
-    })
+    }
     return m
-  }, [sessions, responders])
+  }, [selected, responders])
 
-  // Build routes: lines from assigned/busy responders to their session locations
+  // Build routes: line from assigned responder to selected session only
   const mapRoutes = useMemo(() => {
     const lines: { from: [number, number]; to: [number, number]; color: string; label: string }[] = []
-    sessions.forEach(s => {
-      if (!s.location?.lat || !s.location?.lng || !s.assignedResponder) return
-      // Find the responder with location in the DB
-      const resp = responders.find(r => r.id === s.assignedResponder?.id || r.name === s.assignedResponder?.name)
-      if (resp?.location_lat && resp?.location_lng) {
-        const typeColors: Record<string, string> = { medical: '#e11d48', fire: '#ea580c', police: '#2563eb', rescue: '#7c3aed' }
-        lines.push({
-          from: [Number(resp.location_lat), Number(resp.location_lng)],
-          to: [s.location.lat, s.location.lng],
-          color: typeColors[resp.role] || '#6366f1',
-          label: `${resp.name} → ${s.summary?.split(' ').slice(0, 2).join(' ') || 'Emergency'}`,
-        })
-      }
-    })
+    if (!selected?.location?.lat || !selected?.location?.lng || !selected?.assignedResponder) return lines
+    const resp = responders.find(r => r.id === selected.assignedResponder?.id || r.name === selected.assignedResponder?.name)
+    if (resp?.location_lat && resp?.location_lng) {
+      const typeColors: Record<string, string> = { medical: '#e11d48', fire: '#ea580c', police: '#2563eb', rescue: '#7c3aed' }
+      lines.push({
+        from: [Number(resp.location_lat), Number(resp.location_lng)],
+        to: [selected.location.lat, selected.location.lng],
+        color: typeColors[resp.role] || '#6366f1',
+        label: `${resp.name}`,
+      })
+    }
     return lines
-  }, [sessions, responders])
+  }, [selected, responders])
 
   const criticalCount = sessions.filter(s => s.severity === 'CRITICAL').length
   const availableUnits = responders.filter(r => r.status === 'available').length

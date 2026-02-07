@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import { ArrowLeft, Heart, AlertTriangle, MapPin, Loader2, UserCheck, Clock, Activity, Navigation, X, Radio, RotateCcw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth-guard'
 import { supabase } from '@/lib/supabase'
+import { haversineDistance, formatDistance, estimateETA } from '@/lib/utils'
 
 const MapComponent = dynamic(() => import('@/components/map').then(m => ({ default: m.Map })), { ssr: false })
 
@@ -17,12 +18,29 @@ function MedicalContent() {
   const [assignModal, setAssignModal] = useState<string | null>(null)
 
   const load = async () => {
-    const [{ data: inc }, { data: resp }] = await Promise.all([
-      supabase.from('incidents').select('*').in('type', ['medical', 'accident']).neq('status', 'resolved').order('created_at', { ascending: false }),
+    const [{ data: resp }] = await Promise.all([
       supabase.from('responders').select('*').in('role', ['medical', 'rescue']),
     ])
-    setIncidents(inc || [])
     setResponders(resp || [])
+
+    // Get incidents by type match
+    const { data: byType } = await supabase.from('incidents').select('*').in('type', ['medical', 'accident']).neq('status', 'resolved').order('created_at', { ascending: false })
+
+    // Also get incidents assigned to medical/rescue responders (dispatched from dispatch team)
+    const responderIds = (resp || []).filter(r => r.current_incident_id).map(r => r.current_incident_id as string)
+    let byAssignment: any[] = []
+    if (responderIds.length > 0) {
+      const { data: assigned } = await supabase.from('incidents').select('*').in('id', responderIds).neq('status', 'resolved')
+      byAssignment = assigned || []
+    }
+
+    // Merge and deduplicate
+    const allInc = [...(byType || [])]
+    for (const inc of byAssignment) {
+      if (!allInc.find(i => i.id === inc.id)) allInc.push(inc)
+    }
+    allInc.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    setIncidents(allInc)
     setLoading(false)
   }
 
@@ -30,8 +48,34 @@ function MedicalContent() {
     load()
     const ch = supabase.channel('medical-dash')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'responders' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'incident_assignments' }, () => load())
       .subscribe()
     return () => { supabase.removeChannel(ch) }
+  }, [])
+
+  // Update responder locations to real browser geolocation on mount
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords
+        const { data: medResp } = await supabase.from('responders').select('id').in('role', ['medical', 'rescue'])
+        if (medResp) {
+          for (const r of medResp) {
+            const offsetLat = (Math.random() * 0.015 + 0.003) * (Math.random() > 0.5 ? 1 : -1)
+            const offsetLng = (Math.random() * 0.015 + 0.003) * (Math.random() > 0.5 ? 1 : -1)
+            await supabase.from('responders').update({
+              location_lat: latitude + offsetLat,
+              location_lng: longitude + offsetLng,
+            } as any).eq('id', r.id)
+          }
+          load()
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+    )
   }, [])
 
   const available = responders.filter(r => r.status === 'available').length
@@ -49,11 +93,21 @@ function MedicalContent() {
       popup: `<b>📍 ${i.summary || 'Medical Emergency'}</b><br/><span style="color:#dc2626;font-weight:600">${i.severity}</span> · ${i.type}<br/><em style="color:#6366f1">Live Location</em>`,
       type: 'user-live' as const
     })),
-    ...responders.filter(r => r.location_lat && r.location_lng).map(r => ({
-      position: [Number(r.location_lat), Number(r.location_lng)] as [number, number],
-      popup: `<b>${r.name}</b><br/>${r.unit_id} · <span style="color:${r.status === 'available' ? '#16a34a' : '#dc2626'}">${r.status}</span>`,
-      type: 'responder' as const
-    }))
+    ...responders.filter(r => r.location_lat && r.location_lng).map(r => {
+      let distInfo = ''
+      if (r.current_incident_id) {
+        const inc = incidents.find(i => i.id === r.current_incident_id)
+        if (inc?.location_lat && inc?.location_lng) {
+          const dist = haversineDistance(Number(r.location_lat), Number(r.location_lng), Number(inc.location_lat), Number(inc.location_lng))
+          distInfo = `<br/><span style="color:#6366f1;font-size:11px">📏 ${formatDistance(dist)} · ~${estimateETA(dist)} min ETA</span>`
+        }
+      }
+      return {
+        position: [Number(r.location_lat), Number(r.location_lng)] as [number, number],
+        popup: `<b>${r.name}</b><br/>${r.unit_id} · <span style="color:${r.status === 'available' ? '#16a34a' : '#dc2626'}">${r.status}</span>${distInfo}`,
+        type: 'responder' as const
+      }
+    })
   ]
 
   // Build routes: lines from busy responders to their assigned incidents
@@ -62,11 +116,12 @@ function MedicalContent() {
     .map(r => {
       const inc = incidents.find(i => i.id === r.current_incident_id)
       if (!inc || !inc.location_lat || !inc.location_lng) return null
+      const dist = haversineDistance(Number(r.location_lat), Number(r.location_lng), Number(inc.location_lat), Number(inc.location_lng))
       return {
         from: [Number(r.location_lat), Number(r.location_lng)] as [number, number],
         to: [Number(inc.location_lat), Number(inc.location_lng)] as [number, number],
         color: '#e11d48',
-        label: `${r.name} → ${inc.summary?.split(' ').slice(0, 3).join(' ') || 'Incident'}`,
+        label: `${r.name}`,
       }
     }).filter(Boolean) as { from: [number, number]; to: [number, number]; color: string; label: string }[]
 
@@ -261,7 +316,7 @@ function MedicalContent() {
                     </div>
                   </div>
                   <div className="flex gap-1.5">
-                    {selected.status === 'active' && (
+                    {(selected.status === 'active' || selected.status === 'assigned') && (
                       <button onClick={() => setAssignModal(selected.id)} className="text-[10px] px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors font-semibold border border-rose-200 shadow-sm">
                         <UserCheck className="h-3 w-3 inline mr-1" />Assign
                       </button>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -26,8 +26,40 @@ interface MapComponentProps {
   selectedIncident?: [number, number] | null
 }
 
+// Shared geolocation cache so we only request once across all map instances
+let _geoCache: [number, number] | null = null
+let _geoRequested = false
+
+function useCurrentLocation(): [number, number] | null {
+  const [loc, setLoc] = useState<[number, number] | null>(_geoCache)
+
+  useEffect(() => {
+    if (_geoCache) { setLoc(_geoCache); return }
+    if (_geoRequested) return
+    _geoRequested = true
+
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude]
+          _geoCache = coords
+          setLoc(coords)
+        },
+        () => { /* geolocation denied/unavailable — leave null, map will use fallback */ },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+      )
+    }
+  }, [])
+
+  return loc
+}
+
+// Fallback center (world view) when geolocation is unavailable
+const FALLBACK_CENTER: [number, number] = [20, 0]
+const FALLBACK_ZOOM = 2
+
 export function MapComponent({ 
-  center = [28.6139, 77.2090],
+  center,
   zoom = 13,
   markers = [],
   routes = [],
@@ -38,6 +70,11 @@ export function MapComponent({
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<L.Map | null>(null)
+  const currentLocation = useCurrentLocation()
+
+  // Resolve the effective center: explicit prop > browser geolocation > fallback
+  const effectiveCenter = center || currentLocation || FALLBACK_CENTER
+  const effectiveZoom = center ? zoom : currentLocation ? zoom : FALLBACK_ZOOM
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return
@@ -45,7 +82,7 @@ export function MapComponent({
     mapInstanceRef.current = L.map(mapRef.current, {
       zoomControl: true,
       attributionControl: true,
-    }).setView(center, zoom)
+    }).setView(effectiveCenter, effectiveZoom)
 
     const tileUrl = light
       ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
@@ -68,6 +105,15 @@ export function MapComponent({
       }
     }
   }, [])
+
+  // When geolocation resolves after initial render, re-center the map
+  // (only if no explicit center prop and no markers to fitBounds to)
+  useEffect(() => {
+    if (!mapInstanceRef.current || center || (fitBounds && markers.length > 0)) return
+    if (currentLocation) {
+      mapInstanceRef.current.setView(currentLocation, zoom, { animate: true })
+    }
+  }, [currentLocation, center, fitBounds, markers.length, zoom])
 
   // Handle resize / visibility changes
   useEffect(() => {
@@ -136,10 +182,23 @@ export function MapComponent({
 
     // --- Routes (polylines from responder to incident) ---
     routes.forEach(({ from, to, color = '#6366f1', label }) => {
-      // Skip routes where from and to are the same or very close (< ~500m), or unrealistically far (> ~50km)
-      const distLat = Math.abs(from[0] - to[0])
-      const distLng = Math.abs(from[1] - to[1])
-      if ((distLat < 0.004 && distLng < 0.004) || distLat > 0.5 || distLng > 0.5) return
+      // Calculate actual distance in km using Haversine
+      const R = 6371
+      const dLat = ((to[0] - from[0]) * Math.PI) / 180
+      const dLng = ((to[1] - from[1]) * Math.PI) / 180
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((from[0] * Math.PI) / 180) * Math.cos((to[0] * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2
+      const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+      // Skip routes that are too close (<100m) or unrealistically far (>100km)
+      if (distKm < 0.1 || distKm > 100) return
+
+      // Build distance label
+      const distLabel = distKm < 1 ? `${Math.round(distKm * 1000)} m` : `${Math.round(distKm * 10) / 10} km`
+      const eta = Math.max(1, Math.round((distKm / 40) * 60))
+      const routeLabel = label ? `${label} · ${distLabel} · ~${eta} min` : `${distLabel} · ~${eta} min`
 
       // Animated dashed line
       const polyline = L.polyline([from, to], {
@@ -151,42 +210,48 @@ export function MapComponent({
         lineJoin: 'round',
       }).addTo(map)
 
-      // Add a midpoint label if provided
-      if (label) {
+      // Add a midpoint label with distance & ETA
+      if (routeLabel) {
         const midLat = (from[0] + to[0]) / 2
         const midLng = (from[1] + to[1]) / 2
         const labelIcon = L.divIcon({
           className: 'custom-marker',
-          html: `<div style="background:${color};color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.15);border:2px solid white;">${label}</div>`,
-          iconSize: [60, 20],
-          iconAnchor: [30, 10],
+          html: `<div style="background:${color};color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.15);border:2px solid white;">${routeLabel}</div>`,
+          iconSize: [120, 20],
+          iconAnchor: [60, 10],
         })
         L.marker([midLat, midLng], { icon: labelIcon, interactive: false }).addTo(map)
       }
 
-      // Small direction arrow at the midpoint
-      const midLat = (from[0] + to[0]) / 2
-      const midLng = (from[1] + to[1]) / 2
-      const angle = Math.atan2(to[1] - from[1], to[0] - from[0]) * (180 / Math.PI)
-      const arrowIcon = L.divIcon({
-        className: 'custom-marker',
-        html: `<div style="transform:rotate(${-angle + 90}deg);color:${color};font-size:16px;font-weight:900;text-shadow:0 1px 3px rgba(0,0,0,0.15);">▲</div>`,
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
-      })
-      if (!label) {
-        L.marker([midLat, midLng], { icon: arrowIcon, interactive: false }).addTo(map)
+      // Small direction arrow at the midpoint (only if no label was shown)
+      if (!routeLabel) {
+        const midLat2 = (from[0] + to[0]) / 2
+        const midLng2 = (from[1] + to[1]) / 2
+        const angle = Math.atan2(to[1] - from[1], to[0] - from[0]) * (180 / Math.PI)
+        const arrowIcon = L.divIcon({
+          className: 'custom-marker',
+          html: `<div style="transform:rotate(${-angle + 90}deg);color:${color};font-size:16px;font-weight:900;text-shadow:0 1px 3px rgba(0,0,0,0.15);">▲</div>`,
+          iconSize: [16, 16],
+          iconAnchor: [8, 8],
+        })
+        L.marker([midLat2, midLng2], { icon: arrowIcon, interactive: false }).addTo(map)
       }
     })
 
     // --- Auto-fit bounds ---
     if (fitBounds && markers.length > 0) {
       const allPoints: [number, number][] = markers.map(m => m.position)
-      // Include route endpoints only for visible routes (not skipped ones)
+      // Include route endpoints for visible routes
       routes.forEach(r => {
-        const distLat = Math.abs(r.from[0] - r.to[0])
-        const distLng = Math.abs(r.from[1] - r.to[1])
-        if ((distLat >= 0.004 || distLng >= 0.004) && distLat <= 0.5 && distLng <= 0.5) {
+        const R2 = 6371
+        const dLat2 = ((r.to[0] - r.from[0]) * Math.PI) / 180
+        const dLng2 = ((r.to[1] - r.from[1]) * Math.PI) / 180
+        const a2 =
+          Math.sin(dLat2 / 2) ** 2 +
+          Math.cos((r.from[0] * Math.PI) / 180) * Math.cos((r.to[0] * Math.PI) / 180) *
+          Math.sin(dLng2 / 2) ** 2
+        const dKm = R2 * 2 * Math.atan2(Math.sqrt(a2), Math.sqrt(1 - a2))
+        if (dKm >= 0.1 && dKm <= 100) {
           allPoints.push(r.from, r.to)
         }
       })
@@ -205,9 +270,9 @@ export function MapComponent({
   // Center change when not fitting bounds
   useEffect(() => {
     if (mapInstanceRef.current && !fitBounds) {
-      mapInstanceRef.current.setView(center, zoom)
+      mapInstanceRef.current.setView(effectiveCenter, effectiveZoom)
     }
-  }, [center, zoom, fitBounds])
+  }, [effectiveCenter, effectiveZoom, fitBounds])
 
   return (
     <div 

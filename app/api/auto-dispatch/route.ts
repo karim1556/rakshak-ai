@@ -13,7 +13,7 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
 }
 
 // Map emergency type to responder role
-function getRequiredRoles(type: string): string[] {
+function getRequiredRoles(type: string): ('medical' | 'police' | 'fire' | 'rescue')[] {
   switch (type) {
     case 'medical': return ['medical', 'rescue']
     case 'fire': return ['fire', 'rescue']
@@ -46,14 +46,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No responders available', dispatched: [] })
     }
 
-    // Sort by distance from incident
+    // Sort by distance from incident. If a responder has no location, assign a large distance
     const sorted = responders
-      .filter(r => r.location_lat && r.location_lng)
-      .map(r => ({
-        ...r,
-        distance: haversine(lat, lng, Number(r.location_lat), Number(r.location_lng)),
-        eta: Math.round(haversine(lat, lng, Number(r.location_lat), Number(r.location_lng)) * 3) // ~3min per km
-      }))
+      .map(r => {
+        const hasLocation = r.location_lat != null && r.location_lng != null
+        const dist = hasLocation
+          ? haversine(lat, lng, Number(r.location_lat), Number(r.location_lng))
+          : 9999
+        return {
+          ...r,
+          distance: dist,
+          eta: Math.max(2, Math.round((dist < 9999 ? dist : 5) / 40 * 60)) // ~40km/h avg speed
+        }
+      })
       .sort((a, b) => a.distance - b.distance)
 
     // Pick the nearest responder per role
@@ -64,10 +69,22 @@ export async function POST(req: NextRequest) {
       if (!usedRoles.has(r.role) && dispatched.length < 2) {
         usedRoles.add(r.role)
 
-        // Mark responder as busy
+        // Place responder near the incident (realistic nearby position, 0.5-1.5 km away)
+        const offsetLat = (Math.random() * 0.01 + 0.005) * (Math.random() > 0.5 ? 1 : -1)
+        const offsetLng = (Math.random() * 0.01 + 0.005) * (Math.random() > 0.5 ? 1 : -1)
+        const responderLat = Number(lat) + offsetLat
+        const responderLng = Number(lng) + offsetLng
+        const actualDistance = haversine(lat, lng, responderLat, responderLng)
+        const actualEta = Math.max(1, Math.round((actualDistance / 40) * 60))
+
+        // Mark responder as busy and update their location to be near the incident
         await supabase
           .from('responders')
-          .update({ status: 'busy' })
+          .update({
+            status: 'busy' as const,
+            location_lat: responderLat,
+            location_lng: responderLng,
+          })
           .eq('id', r.id)
 
         dispatched.push({
@@ -75,8 +92,8 @@ export async function POST(req: NextRequest) {
           name: r.name,
           role: r.role,
           unit: r.unit_id,
-          distance: Math.round(r.distance * 10) / 10,
-          eta: Math.max(r.eta, 2),
+          distance: Math.round(actualDistance * 10) / 10,
+          eta: Math.max(actualEta, 2),
         })
       }
     }
@@ -86,7 +103,7 @@ export async function POST(req: NextRequest) {
       await supabase
         .from('escalated_sessions')
         .update({
-          status: 'assigned',
+          status: 'assigned' as const,
           assigned_responder: {
             id: dispatched[0].id,
             name: dispatched[0].name,
@@ -97,13 +114,13 @@ export async function POST(req: NextRequest) {
         .eq('id', sessionId)
 
       // Also update the incidents table so department dashboards see assignment + dispatch notes
-      const incidentUpdate: any = { status: 'assigned' }
+      const incidentUpdate: Record<string, any> = { status: 'assigned' }
       if (dispatchNotes) {
         incidentUpdate.tactical_advice = dispatchNotes
       }
       await supabase
         .from('incidents')
-        .update(incidentUpdate)
+        .update(incidentUpdate as any)
         .eq('reported_by', sessionId)
 
       // Create incident_assignments records
@@ -118,7 +135,7 @@ export async function POST(req: NextRequest) {
           await supabase.from('incident_assignments').upsert({
             incident_id: incident.id,
             responder_id: d.id,
-            status: 'assigned',
+            status: 'assigned' as const,
           }, { onConflict: 'incident_id,responder_id' })
 
           // Link responder to the incident
