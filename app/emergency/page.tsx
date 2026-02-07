@@ -60,34 +60,71 @@ export default function EmergencyPage() {
   // SOS state
   const [sosCountdown, setSosCountdown] = useState<number | null>(null)
   const sosTapRef = useRef<number[]>([])
+  const watchIdRef = useRef<number | null>(null)
+  const lastLocationBroadcastRef = useRef<number>(0)
 
   // Auto-scroll messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [session?.messages])
 
-  // Geolocation — auto-capture on mount
+  // Live Geolocation — continuous tracking with watchPosition
   useEffect(() => {
     if (!navigator.geolocation) {
       setGeoStatus('denied')
       return
     }
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const loc: { lat: number; lng: number; address?: string } = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        // Reverse geocode
+
+    const handlePosition = async (pos: GeolocationPosition) => {
+      const loc: { lat: number; lng: number; address?: string } = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+      }
+
+      // Reverse geocode only on first capture or every 30s
+      const now = Date.now()
+      if (!locationRef.current || now - lastLocationBroadcastRef.current > 30000) {
         try {
           const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${loc.lat}&lon=${loc.lng}&format=json`)
           const data = await res.json()
           loc.address = data.display_name || undefined
         } catch {}
-        locationRef.current = loc
-        updateSessionInfo({ location: loc })
-        setGeoStatus('ok')
-      },
+      } else {
+        loc.address = locationRef.current.address
+      }
+
+      locationRef.current = loc
+      updateSessionInfo({ location: loc })
+      setGeoStatus('ok')
+
+      // Broadcast live location to server every 10 seconds
+      const currentSession = useEmergencyStore.getState().session
+      if (currentSession?.isEscalated && now - lastLocationBroadcastRef.current > 10000) {
+        lastLocationBroadcastRef.current = now
+        fetch('/api/location-update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: currentSession.id,
+            lat: loc.lat,
+            lng: loc.lng,
+            address: loc.address,
+          }),
+        }).catch(() => {})
+      }
+    }
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      handlePosition,
       () => setGeoStatus('denied'),
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     )
+
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current)
+      }
+    }
   }, [])
 
   // Listen for dispatch messages via Supabase Realtime
@@ -642,35 +679,36 @@ export default function EmergencyPage() {
   const totalSteps = session?.steps?.length || 0
 
   return (
-    <div className="h-screen bg-black text-white flex overflow-hidden" onClick={handleSOSTap}>
+    <div className="h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 text-slate-900 flex overflow-hidden" onClick={handleSOSTap}>
       <audio ref={audioRef} />
       <canvas ref={canvasRef} className="hidden" />
 
       {/* SOS Countdown Overlay */}
       {sosCountdown !== null && (
-        <div className="fixed inset-0 z-50 bg-red-600 flex items-center justify-center">
-          <div className="text-center">
+        <div className="fixed inset-0 z-50 bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center">
+          <div className="text-center text-white">
             <AlertOctagon className="h-20 w-20 mx-auto mb-4 animate-pulse" />
             <p className="text-4xl font-bold">SILENT SOS</p>
-            <p className="text-lg mt-2 text-red-200">Alerting dispatch...</p>
+            <p className="text-lg mt-2 text-red-100">Alerting dispatch...</p>
           </div>
         </div>
       )}
 
       {/* Geolocation indicator */}
       {geoStatus !== 'pending' && (
-        <div className="absolute top-4 left-16 z-30 flex items-center gap-1 px-2 py-1 bg-zinc-900/80 rounded-full">
-          <MapPin className={`h-3 w-3 ${geoStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`} />
-          <span className="text-[10px] text-zinc-400">
+        <div className="absolute top-4 left-16 z-30 flex items-center gap-1.5 px-3 py-1.5 bg-white/90 backdrop-blur-sm rounded-full shadow-sm border border-slate-200">
+          <MapPin className={`h-3.5 w-3.5 ${geoStatus === 'ok' ? 'text-emerald-500' : 'text-red-500'}`} />
+          <span className="text-xs font-medium text-slate-600">
             {geoStatus === 'ok' ? (locationRef.current?.address?.split(',')[0] || 'Located') : 'No GPS'}
           </span>
+          {geoStatus === 'ok' && <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />}
         </div>
       )}
       
       {/* Camera Preview - Floating */}
       {cameraEnabled && (
         <div className="absolute top-20 right-4 z-30 animate-in slide-in-from-right">
-          <div className="relative bg-slate-900 rounded-2xl overflow-hidden w-48 h-36">
+          <div className="relative bg-slate-900 rounded-2xl overflow-hidden w-48 h-36 shadow-xl">
             <video
               ref={videoRef}
               autoPlay
@@ -678,7 +716,7 @@ export default function EmergencyPage() {
               muted
               width="192"
               height="144"
-              className="absolute inset-0 w-full h-full object-cover border-2 border-green-500/50 shadow-lg shadow-green-500/20 bg-slate-900"
+              className="absolute inset-0 w-full h-full object-cover border-2 border-emerald-400/50 rounded-2xl bg-slate-900"
               onError={(e) => {
                 console.error('Video element error:', e)
                 alert('Video playback error. Camera might not be supported.')
@@ -688,22 +726,22 @@ export default function EmergencyPage() {
               }}
             />
             {!cameraReady && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
-                <Loader2 className="h-8 w-8 text-green-500 animate-spin" />
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-900 rounded-2xl">
+                <Loader2 className="h-8 w-8 text-emerald-500 animate-spin" />
               </div>
             )}
-            <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-1 bg-green-500/80 rounded-full">
-              <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
-              <span className="text-xs font-medium">{cameraReady ? 'LIVE' : 'STARTING...'}</span>
+            <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-1 bg-emerald-500 rounded-full shadow-sm">
+              <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+              <span className="text-[10px] font-bold text-white">{cameraReady ? 'LIVE' : 'STARTING...'}</span>
             </div>
             <button
               onClick={toggleCamera}
-              className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
+              className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5 text-white" />
             </button>
           </div>
-          <p className="text-xs text-green-400 text-center mt-2">
+          <p className="text-[10px] text-emerald-600 text-center mt-2 font-medium">
             {cameraReady ? 'AI can see this' : 'Loading camera...'}
           </p>
         </div>
@@ -711,30 +749,30 @@ export default function EmergencyPage() {
       
       {/* Main Conversation Area */}
       <div className="flex-1 flex flex-col relative">
-        {/* Gradient Background */}
-        <div className="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-950 to-black" />
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-gradient-to-b from-blue-500/10 via-purple-500/5 to-transparent rounded-full blur-3xl" />
+        {/* Subtle gradient background */}
+        <div className="absolute inset-0 bg-gradient-to-b from-indigo-50/40 via-white to-slate-50" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[300px] bg-gradient-to-b from-indigo-100/40 via-violet-50/20 to-transparent rounded-full blur-3xl" />
         
         {/* Header */}
-        <header className="relative z-10 p-4 flex items-center justify-between border-b border-white/5">
-          <button onClick={handleEndSession} className="p-2.5 bg-white/5 hover:bg-white/10 rounded-xl transition-all">
-            <X className="h-5 w-5" />
+        <header className="relative z-10 p-4 flex items-center justify-between border-b border-slate-200/60 bg-white/60 backdrop-blur-sm">
+          <button onClick={handleEndSession} className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all">
+            <X className="h-5 w-5 text-slate-500" />
           </button>
           
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-              session?.severity === 'CRITICAL' ? 'bg-red-500/20' :
-              session?.severity === 'HIGH' ? 'bg-orange-500/20' :
-              session?.severity === 'MEDIUM' ? 'bg-yellow-500/20' : 'bg-blue-500/20'
+              session?.severity === 'CRITICAL' ? 'bg-red-100' :
+              session?.severity === 'HIGH' ? 'bg-orange-100' :
+              session?.severity === 'MEDIUM' ? 'bg-amber-100' : 'bg-indigo-100'
             }`}>
               <TypeIcon className={`h-5 w-5 ${
-                session?.severity === 'CRITICAL' ? 'text-red-400' :
-                session?.severity === 'HIGH' ? 'text-orange-400' :
-                session?.severity === 'MEDIUM' ? 'text-yellow-400' : 'text-blue-400'
+                session?.severity === 'CRITICAL' ? 'text-red-600' :
+                session?.severity === 'HIGH' ? 'text-orange-600' :
+                session?.severity === 'MEDIUM' ? 'text-amber-600' : 'text-indigo-600'
               }`} />
             </div>
             <div>
-              <h1 className="font-semibold text-sm">Rakshak AI</h1>
+              <h1 className="font-semibold text-sm text-slate-900">Rakshak AI</h1>
               <p className="text-xs text-slate-500">
                 {isEscalated ? 'Dispatch Connected' : session?.summary || 'Emergency Assistant'}
               </p>
@@ -743,14 +781,14 @@ export default function EmergencyPage() {
           
           <button 
             onClick={state === 'speaking' ? stopSpeaking : undefined}
-            className="p-2.5 bg-white/5 hover:bg-white/10 rounded-xl transition-all"
+            className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
           >
-            {state === 'speaking' ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5 text-slate-500" />}
+            {state === 'speaking' ? <VolumeX className="h-5 w-5 text-slate-600" /> : <Volume2 className="h-5 w-5 text-slate-400" />}
           </button>
         </header>
 
         {/* Messages */}
-        <div className="relative z-10 flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="relative z-10 flex-1 overflow-y-auto p-6 space-y-5">
           {session?.messages.map((msg, idx) => (
             <div
               key={msg.id}
@@ -758,20 +796,20 @@ export default function EmergencyPage() {
               style={{ animationDelay: `${idx * 50}ms` }}
             >
               {msg.role === 'system' ? (
-                <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/20 rounded-full">
-                  <AlertTriangle className="h-4 w-4 text-amber-400" />
-                  <span className="text-sm text-amber-300">{msg.content}</span>
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-full">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <span className="text-sm text-amber-800 font-medium">{msg.content}</span>
                 </div>
               ) : (
                 <div className={`max-w-[85%] ${msg.role === 'user' ? 'order-2' : ''}`}>
-                  <div className={`rounded-2xl px-5 py-3 ${
+                  <div className={`rounded-2xl px-5 py-3 shadow-sm ${
                     msg.role === 'user' 
-                      ? 'bg-blue-600 ml-auto' 
-                      : 'bg-white/5 backdrop-blur-sm border border-white/10'
+                      ? 'bg-indigo-600 text-white ml-auto' 
+                      : 'bg-white border border-slate-200 text-slate-800'
                   }`}>
                     <p className="text-[15px] leading-relaxed">{msg.content}</p>
                   </div>
-                  <p className="text-[10px] text-slate-600 mt-1.5 px-2">
+                  <p className="text-[10px] text-slate-400 mt-1.5 px-2">
                     {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </p>
                 </div>
@@ -781,11 +819,11 @@ export default function EmergencyPage() {
           
           {state === 'processing' && (
             <div className="flex justify-start animate-in fade-in">
-              <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl px-5 py-3">
+              <div className="bg-white border border-slate-200 rounded-2xl px-5 py-3 shadow-sm">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" />
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                  <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" />
+                  <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                  <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                 </div>
               </div>
             </div>
@@ -795,20 +833,20 @@ export default function EmergencyPage() {
         </div>
 
         {/* Voice Control */}
-        <div className="relative z-10 p-6 pb-8">
+        <div className="relative z-10 p-6 pb-8 bg-white/40 backdrop-blur-sm border-t border-slate-200/60">
           {/* Waveform */}
-          <div className="flex items-center justify-center gap-1 h-16 mb-6">
+          <div className="flex items-center justify-center gap-1 h-14 mb-5">
             {waveformBars.map((height, i) => (
               <div
                 key={i}
                 className={`w-1 rounded-full transition-all duration-75 ${
                   state === 'listening' ? 'bg-red-500' :
-                  state === 'speaking' ? 'bg-purple-500' :
-                  state === 'processing' ? 'bg-yellow-500' : 'bg-slate-700'
+                  state === 'speaking' ? 'bg-indigo-500' :
+                  state === 'processing' ? 'bg-amber-500' : 'bg-slate-300'
                 }`}
                 style={{ 
                   height: `${height * 100}%`,
-                  opacity: state === 'idle' ? 0.3 : 1
+                  opacity: state === 'idle' ? 0.4 : 1
                 }}
               />
             ))}
@@ -819,16 +857,16 @@ export default function EmergencyPage() {
             {/* Camera Toggle */}
             <button
               onClick={toggleCamera}
-              className={`w-14 h-14 rounded-full transition-all duration-200 flex items-center justify-center ${
+              className={`w-14 h-14 rounded-full transition-all duration-200 flex items-center justify-center shadow-md ${
                 cameraEnabled 
-                  ? 'bg-green-500 shadow-lg shadow-green-500/50' 
-                  : 'bg-white/10 hover:bg-white/15'
+                  ? 'bg-emerald-500 text-white shadow-emerald-200' 
+                  : 'bg-white border border-slate-200 hover:bg-slate-50 text-slate-500'
               }`}
             >
               {cameraEnabled ? (
                 <Video className="h-6 w-6" />
               ) : (
-                <VideoOff className="h-6 w-6 text-slate-400" />
+                <VideoOff className="h-6 w-6" />
               )}
             </button>
             
@@ -840,12 +878,12 @@ export default function EmergencyPage() {
               onTouchStart={handleMicPress}
               onTouchEnd={handleMicRelease}
               disabled={state === 'processing'}
-              className={`relative w-20 h-20 rounded-full transition-all duration-200 flex items-center justify-center active:scale-95 disabled:opacity-50 ${
+              className={`relative w-20 h-20 rounded-full transition-all duration-200 flex items-center justify-center active:scale-95 disabled:opacity-50 shadow-lg ${
                 state === 'listening' 
-                  ? 'bg-red-500 shadow-lg shadow-red-500/50' 
+                  ? 'bg-red-500 text-white shadow-red-200' 
                   : state === 'speaking'
-                  ? 'bg-purple-600 shadow-lg shadow-purple-500/50'
-                  : 'bg-white/10 hover:bg-white/15'
+                  ? 'bg-indigo-600 text-white shadow-indigo-200'
+                  : 'bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-indigo-200 hover:shadow-xl'
               }`}
             >
               {state === 'processing' ? (
@@ -857,11 +895,11 @@ export default function EmergencyPage() {
               )}
               
               {state === 'listening' && (
-                <div className="absolute inset-0 rounded-full border-4 border-red-400 animate-ping" />
+                <div className="absolute inset-0 rounded-full border-4 border-red-300 animate-ping" />
               )}
             </button>
             
-            {/* Capture Frame Button - only visible when camera is on */}
+            {/* Capture Frame Button */}
             <button
               onClick={async () => {
                 if (!cameraEnabled) return
@@ -898,35 +936,35 @@ export default function EmergencyPage() {
                 }
               }}
               disabled={!cameraEnabled || state === 'processing'}
-              className={`w-14 h-14 rounded-full transition-all duration-200 flex items-center justify-center ${
+              className={`w-14 h-14 rounded-full transition-all duration-200 flex items-center justify-center shadow-md ${
                 cameraEnabled 
-                  ? 'bg-blue-500 hover:bg-blue-600 shadow-lg shadow-blue-500/50' 
-                  : 'bg-white/5 cursor-not-allowed'
+                  ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-200' 
+                  : 'bg-slate-100 cursor-not-allowed border border-slate-200'
               }`}
             >
-              <Camera className={`h-6 w-6 ${cameraEnabled ? 'text-white' : 'text-slate-600'}`} />
+              <Camera className={`h-6 w-6 ${cameraEnabled ? 'text-white' : 'text-slate-300'}`} />
             </button>
           </div>
 
-          <p className="text-center text-sm text-slate-500 mt-4">
+          <p className="text-center text-sm text-slate-500 mt-4 font-medium">
             {state === 'listening' ? 'Listening... release to send' :
              state === 'processing' ? (cameraEnabled ? 'Analyzing with vision...' : 'Processing...') :
              state === 'speaking' ? 'Speaking...' :
-             cameraEnabled ? 'Hold mic to talk • Tap camera to share view' : 'Hold to talk'}
+             cameraEnabled ? 'Hold mic to talk — Tap camera to share view' : 'Hold to talk'}
           </p>
-          <p className="text-center text-[10px] text-zinc-700 mt-2">Triple-tap anywhere for silent SOS</p>
+          <p className="text-center text-[10px] text-slate-400 mt-2">Triple-tap anywhere for silent SOS</p>
         </div>
 
         {/* Escalated Banner */}
         {isEscalated && (
-          <div className="absolute top-20 left-4 right-4 bg-gradient-to-r from-red-600 to-red-700 rounded-2xl p-4 z-20 animate-in slide-in-from-top">
+          <div className="absolute top-20 left-4 right-4 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-2xl p-4 z-20 animate-in slide-in-from-top shadow-xl shadow-red-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
                 <Phone className="h-5 w-5 animate-pulse" />
               </div>
               <div>
                 <p className="font-semibold">Emergency Dispatch Connected</p>
-                <p className="text-sm text-red-200">Professional help is on the way</p>
+                <p className="text-sm text-red-100">Professional help is on the way</p>
               </div>
             </div>
           </div>
@@ -934,18 +972,18 @@ export default function EmergencyPage() {
       </div>
 
       {/* Steps Sidebar */}
-      <div className="w-80 bg-slate-900/50 backdrop-blur-xl border-l border-white/5 flex flex-col">
-        <div className="p-5 border-b border-white/5">
+      <div className="w-80 bg-white/70 backdrop-blur-xl border-l border-slate-200/60 flex flex-col">
+        <div className="p-5 border-b border-slate-200/60">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">Action Steps</h2>
+            <h2 className="font-bold text-slate-900">Action Steps</h2>
             {totalSteps > 0 && (
-              <span className="text-xs text-slate-500">{completedSteps}/{totalSteps}</span>
+              <span className="text-xs text-slate-500 font-medium">{completedSteps}/{totalSteps}</span>
             )}
           </div>
           {totalSteps > 0 && (
-            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-gradient-to-r from-green-400 to-emerald-500 transition-all duration-500"
+                className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500 rounded-full"
                 style={{ width: `${(completedSteps / totalSteps) * 100}%` }}
               />
             </div>
@@ -959,8 +997,8 @@ export default function EmergencyPage() {
                 key={step.id}
                 className={`group rounded-xl p-4 transition-all duration-300 animate-in fade-in slide-in-from-right ${
                   step.completed 
-                    ? 'bg-green-500/10 border border-green-500/20' 
-                    : 'bg-white/5 border border-white/10 hover:border-white/20'
+                    ? 'bg-emerald-50 border border-emerald-200' 
+                    : 'bg-white border border-slate-200 hover:border-indigo-200 shadow-sm'
                 }`}
                 style={{ animationDelay: `${index * 100}ms` }}
               >
@@ -969,8 +1007,8 @@ export default function EmergencyPage() {
                     onClick={() => completeStep(step.id)}
                     className={`mt-0.5 w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center transition-all ${
                       step.completed 
-                        ? 'bg-green-500 text-white' 
-                        : 'border-2 border-slate-600 hover:border-green-400 text-slate-600 hover:text-green-400'
+                        ? 'bg-emerald-500 text-white' 
+                        : 'border-2 border-slate-300 hover:border-indigo-500 text-slate-400 hover:text-indigo-500'
                     }`}
                   >
                     {step.completed ? (
@@ -979,7 +1017,7 @@ export default function EmergencyPage() {
                       <span className="text-xs font-bold">{index + 1}</span>
                     )}
                   </button>
-                  <p className={`text-sm leading-relaxed ${step.completed ? 'text-green-300/70 line-through' : 'text-slate-300'}`}>
+                  <p className={`text-sm leading-relaxed ${step.completed ? 'text-emerald-700/60 line-through' : 'text-slate-700'}`}>
                     {step.text}
                   </p>
                 </div>
@@ -987,30 +1025,30 @@ export default function EmergencyPage() {
             ))
           ) : (
             <div className="flex flex-col items-center justify-center h-48 text-center">
-              <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center mb-3">
-                <ChevronRight className="h-6 w-6 text-slate-600" />
+              <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mb-3">
+                <ChevronRight className="h-6 w-6 text-slate-400" />
               </div>
-              <p className="text-sm text-slate-500">Steps will appear here as we work through your situation</p>
+              <p className="text-sm text-slate-400">Steps will appear here as we work through your situation</p>
             </div>
           )}
         </div>
 
         {/* Escalate Button */}
-        <div className="p-4 border-t border-white/5">
+        <div className="p-4 border-t border-slate-200/60">
           <button
             onClick={handleEscalate}
             disabled={isEscalated}
-            className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-all ${
+            className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold transition-all ${
               isEscalated 
-                ? 'bg-green-600/20 text-green-400 cursor-default' 
-                : 'bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20'
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-default' 
+                : 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-200'
             }`}
           >
             <Phone className="h-5 w-5" />
             {isEscalated ? 'Dispatch Connected' : 'Connect to Emergency Services'}
           </button>
           {!isEscalated && (
-            <p className="text-[10px] text-slate-600 text-center mt-2">
+            <p className="text-[10px] text-slate-400 text-center mt-2">
               Use only if you need professional emergency help
             </p>
           )}
