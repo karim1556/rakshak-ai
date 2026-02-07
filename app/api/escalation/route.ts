@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase'
+import { guardEscalation } from '@/lib/spam-guard'
 
 export async function GET() {
   const supabase = createServerClient()
@@ -32,6 +33,7 @@ export async function GET() {
     language: row.language,
     imageSnapshot: row.image_snapshot,
     qaReport: row.qa_report,
+    spamVerdict: row.spam_verdict,
   }))
 
   return NextResponse.json({ sessions })
@@ -45,6 +47,20 @@ export async function POST(req: NextRequest) {
     if (!session.id) {
       return NextResponse.json({ error: 'Session ID required' }, { status: 400 })
     }
+
+    // ── Spam Guard ──
+    const guard = await guardEscalation(req, session)
+    if (!guard.allowed) {
+      return guard.response!
+    }
+
+    // Attach spam verdict metadata to the session for dispatch review
+    const spamMetadata = guard.verdict ? {
+      trustScore: guard.verdict.trustScore,
+      classification: guard.verdict.classification,
+      reasons: guard.verdict.reasons,
+      requiresVerification: guard.verdict.requiresVerification,
+    } : null
 
     const { error } = await supabase.from('escalated_sessions').upsert({
       id: session.id,
@@ -61,6 +77,7 @@ export async function POST(req: NextRequest) {
       language: session.language || 'en',
       image_snapshot: session.imageSnapshot || null,
       escalated_at: new Date().toISOString(),
+      spam_verdict: spamMetadata,
     })
 
     if (error) {
@@ -106,6 +123,7 @@ export async function POST(req: NextRequest) {
       sessionId: session.id,
       incidentId,
       message: 'Session escalated to dispatch',
+      spamVerdict: spamMetadata,
     })
   } catch (error) {
     console.error('Escalation error:', error)

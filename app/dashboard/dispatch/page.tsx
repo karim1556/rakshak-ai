@@ -450,6 +450,9 @@ function DispatchContent() {
               <Zap className="h-3 w-3" /> {criticalCount} critical
             </span>
           )}
+          <Link href="/dashboard/spam" className="flex items-center gap-1 text-slate-500 hover:text-red-600 bg-slate-50 hover:bg-red-50 px-2.5 py-1.5 rounded-full border border-slate-200 hover:border-red-200 transition-colors font-medium">
+            <Shield className="h-3 w-3" /> Spam Monitor
+          </Link>
           <span className="text-slate-500 font-medium">{sessions.length} active</span>
           <span className="text-slate-300">|</span>
           <span className="text-emerald-600 font-medium">{availableUnits} units ready</span>
@@ -491,6 +494,15 @@ function DispatchContent() {
                       <div className="flex items-center gap-1.5 mb-1">
                         <span className={`text-[9px] px-1.5 py-px rounded-full border font-semibold ${sevBadge(s.severity)}`}>{s.severity}</span>
                         <span className={`text-[9px] px-1.5 py-px rounded-full font-medium ${statusBadge(s.status)}`}>{s.status}</span>
+                        {(s as any).spamVerdict && (s as any).spamVerdict.classification !== 'genuine' && (
+                          <span className={`text-[9px] px-1.5 py-px rounded-full font-semibold ${
+                            (s as any).spamVerdict.classification === 'confirmed_spam' ? 'bg-red-100 text-red-700 border border-red-200' :
+                            (s as any).spamVerdict.classification === 'likely_spam' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+                            'bg-yellow-100 text-yellow-700 border border-yellow-200'
+                          }`}>
+                            ⚠ {(s as any).spamVerdict.trustScore}%
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
                         <Clock className="h-2.5 w-2.5" />

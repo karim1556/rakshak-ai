@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { guardAgentConversation } from '@/lib/spam-guard'
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -30,6 +31,12 @@ export async function POST(req: NextRequest) {
 
     if (!message && !imageBase64) {
       return NextResponse.json({ error: 'Message or image is required' }, { status: 400 })
+    }
+
+    // ── Spam Guard ──
+    const guard = guardAgentConversation(req, sessionId || 'unknown', message || '')
+    if (!guard.allowed) {
+      return guard.response!
     }
 
     // Build conversation context

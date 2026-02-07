@@ -24,7 +24,9 @@ export interface Database {
           location_lat: number | null
           location_lng: number | null
           location_address: string | null
+          dispatch_notes: string
           reported_by: string | null
+          language: string
           created_at: string
           updated_at: string
         }
@@ -42,7 +44,9 @@ export interface Database {
           location_lat?: number | null
           location_lng?: number | null
           location_address?: string | null
+          dispatch_notes?: string
           reported_by?: string | null
+          language?: string
           created_at?: string
           updated_at?: string
         }
@@ -60,7 +64,9 @@ export interface Database {
           location_lat?: number | null
           location_lng?: number | null
           location_address?: string | null
+          dispatch_notes?: string
           reported_by?: string | null
+          language?: string
           updated_at?: string
         }
         Relationships: []
@@ -142,6 +148,7 @@ export interface Database {
           resolved_at: string | null
           qa_report: Json | null
           dispatch_notes: string
+          spam_verdict: Json | null
           created_at: string
           updated_at: string
         }
@@ -164,6 +171,7 @@ export interface Database {
           resolved_at?: string | null
           qa_report?: Json | null
           dispatch_notes?: string
+          spam_verdict?: Json | null
           created_at?: string
           updated_at?: string
         }
@@ -184,6 +192,7 @@ export interface Database {
           resolved_at?: string | null
           qa_report?: Json | null
           dispatch_notes?: string
+          spam_verdict?: Json | null
           updated_at?: string
         }
         Relationships: []
@@ -206,6 +215,144 @@ export interface Database {
         Update: {
           sender_role?: string
           content?: string
+        }
+        Relationships: []
+      }
+      spam_reports: {
+        Row: {
+          id: string
+          ip_address: string
+          session_id: string | null
+          trust_score: number
+          classification: 'genuine' | 'suspicious' | 'likely_spam' | 'confirmed_spam'
+          reasons: string[]
+          action_taken: 'allow' | 'flag_for_review' | 'require_verification' | 'block'
+          endpoint: string
+          reviewed: boolean
+          reviewed_by: string | null
+          review_outcome: 'confirmed_spam' | 'false_positive' | 'genuine' | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          ip_address: string
+          session_id?: string | null
+          trust_score: number
+          classification: 'genuine' | 'suspicious' | 'likely_spam' | 'confirmed_spam'
+          reasons?: string[]
+          action_taken: 'allow' | 'flag_for_review' | 'require_verification' | 'block'
+          endpoint: string
+          reviewed?: boolean
+          reviewed_by?: string | null
+          review_outcome?: 'confirmed_spam' | 'false_positive' | 'genuine' | null
+          created_at?: string
+        }
+        Update: {
+          reviewed?: boolean
+          reviewed_by?: string | null
+          review_outcome?: 'confirmed_spam' | 'false_positive' | 'genuine' | null
+        }
+        Relationships: []
+      }
+      community_alerts: {
+        Row: {
+          id: string
+          incident_id: string | null
+          alert_type: 'warning' | 'advisory' | 'all_clear' | 'evacuation' | 'shelter_in_place'
+          title: string
+          message: string
+          severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+          radius_km: number
+          center_lat: number | null
+          center_lng: number | null
+          active: boolean
+          expires_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          incident_id?: string | null
+          alert_type: 'warning' | 'advisory' | 'all_clear' | 'evacuation' | 'shelter_in_place'
+          title: string
+          message: string
+          severity?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+          radius_km?: number
+          center_lat?: number | null
+          center_lng?: number | null
+          active?: boolean
+          expires_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          alert_type?: 'warning' | 'advisory' | 'all_clear' | 'evacuation' | 'shelter_in_place'
+          title?: string
+          message?: string
+          severity?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+          radius_km?: number
+          center_lat?: number | null
+          center_lng?: number | null
+          active?: boolean
+          expires_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      emergency_contacts: {
+        Row: {
+          id: string
+          citizen_identifier: string
+          contact_name: string
+          contact_phone: string
+          contact_email: string | null
+          relationship: string
+          auto_notify: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          citizen_identifier: string
+          contact_name: string
+          contact_phone: string
+          contact_email?: string | null
+          relationship: string
+          auto_notify?: boolean
+          created_at?: string
+        }
+        Update: {
+          contact_name?: string
+          contact_phone?: string
+          contact_email?: string | null
+          relationship?: string
+          auto_notify?: boolean
+        }
+        Relationships: []
+      }
+      incident_verifications: {
+        Row: {
+          id: string
+          incident_id: string
+          verifier_ip: string
+          verification_type: 'confirm' | 'deny' | 'additional_info'
+          details: string | null
+          location_lat: number | null
+          location_lng: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          incident_id: string
+          verifier_ip: string
+          verification_type: 'confirm' | 'deny' | 'additional_info'
+          details?: string | null
+          location_lat?: number | null
+          location_lng?: number | null
+          created_at?: string
+        }
+        Update: {
+          verification_type?: 'confirm' | 'deny' | 'additional_info'
+          details?: string | null
         }
         Relationships: []
       }

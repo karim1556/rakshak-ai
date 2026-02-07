@@ -1,6 +1,8 @@
 import { generateObject } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
+import { guardAnalysis } from '@/lib/spam-guard'
+import { NextRequest } from 'next/server'
 
 const analysisSchema = z.object({
   severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
@@ -11,8 +13,14 @@ const analysisSchema = z.object({
   keyFacts: z.array(z.string()),
 })
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
+    // ── Spam Guard ──
+    const guard = guardAnalysis(request)
+    if (!guard.allowed) {
+      return guard.response!
+    }
+
     const { emergencyType, description, location } = await request.json()
 
     const prompt = `You are an expert emergency dispatch AI. Analyze this emergency report and provide critical response information.

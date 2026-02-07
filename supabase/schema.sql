@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS escalated_sessions (
   resolved_at TIMESTAMPTZ,
   qa_report JSONB,
   dispatch_notes TEXT DEFAULT '',
+  spam_verdict JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -82,6 +83,63 @@ CREATE TABLE IF NOT EXISTS communications (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Spam Reports (audit log for flagged/blocked reports)
+CREATE TABLE IF NOT EXISTS spam_reports (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  ip_address TEXT NOT NULL,
+  session_id TEXT,
+  trust_score INTEGER NOT NULL,
+  classification TEXT NOT NULL CHECK (classification IN ('genuine', 'suspicious', 'likely_spam', 'confirmed_spam')),
+  reasons TEXT[] DEFAULT '{}',
+  action_taken TEXT NOT NULL CHECK (action_taken IN ('allow', 'flag_for_review', 'require_verification', 'block')),
+  endpoint TEXT NOT NULL,
+  reviewed BOOLEAN DEFAULT FALSE,
+  reviewed_by TEXT,
+  review_outcome TEXT CHECK (review_outcome IN ('confirmed_spam', 'false_positive', 'genuine', NULL)),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Community Alerts (broadcast safety alerts to nearby citizens)
+CREATE TABLE IF NOT EXISTS community_alerts (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  incident_id UUID REFERENCES incidents(id) ON DELETE CASCADE,
+  alert_type TEXT NOT NULL CHECK (alert_type IN ('warning', 'advisory', 'all_clear', 'evacuation', 'shelter_in_place')),
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')),
+  radius_km DECIMAL(5, 2) DEFAULT 2.0,
+  center_lat DECIMAL(10, 8),
+  center_lng DECIMAL(11, 8),
+  active BOOLEAN DEFAULT TRUE,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Emergency Contacts (citizen emergency contacts for auto-notification)
+CREATE TABLE IF NOT EXISTS emergency_contacts (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  citizen_identifier TEXT NOT NULL, -- phone number or device ID
+  contact_name TEXT NOT NULL,
+  contact_phone TEXT NOT NULL,
+  contact_email TEXT,
+  relationship TEXT NOT NULL,
+  auto_notify BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Incident Verifications (crowd-sourced incident confirmation)
+CREATE TABLE IF NOT EXISTS incident_verifications (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  incident_id UUID NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+  verifier_ip TEXT NOT NULL,
+  verification_type TEXT NOT NULL CHECK (verification_type IN ('confirm', 'deny', 'additional_info')),
+  details TEXT,
+  location_lat DECIMAL(10, 8),
+  location_lng DECIMAL(11, 8),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
 CREATE INDEX IF NOT EXISTS idx_incidents_severity ON incidents(severity);
@@ -92,6 +150,12 @@ CREATE INDEX IF NOT EXISTS idx_responders_role ON responders(role);
 CREATE INDEX IF NOT EXISTS idx_escalated_status ON escalated_sessions(status);
 CREATE INDEX IF NOT EXISTS idx_escalated_at ON escalated_sessions(escalated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_comms_session ON communications(session_id);
+CREATE INDEX IF NOT EXISTS idx_spam_reports_ip ON spam_reports(ip_address);
+CREATE INDEX IF NOT EXISTS idx_spam_reports_classification ON spam_reports(classification);
+CREATE INDEX IF NOT EXISTS idx_spam_reports_created ON spam_reports(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_community_alerts_active ON community_alerts(active);
+CREATE INDEX IF NOT EXISTS idx_community_alerts_location ON community_alerts(center_lat, center_lng);
+CREATE INDEX IF NOT EXISTS idx_incident_verifications ON incident_verifications(incident_id);
 
 -- RLS
 ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
@@ -99,6 +163,10 @@ ALTER TABLE responders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE incident_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE escalated_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE communications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE spam_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE community_alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE emergency_contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE incident_verifications ENABLE ROW LEVEL SECURITY;
 
 -- Drop existing policies if they exist
 DROP POLICY IF EXISTS "Allow all incidents" ON incidents;
@@ -106,6 +174,10 @@ DROP POLICY IF EXISTS "Allow all responders" ON responders;
 DROP POLICY IF EXISTS "Allow all assignments" ON incident_assignments;
 DROP POLICY IF EXISTS "Allow all sessions" ON escalated_sessions;
 DROP POLICY IF EXISTS "Allow all communications" ON communications;
+DROP POLICY IF EXISTS "Allow all spam_reports" ON spam_reports;
+DROP POLICY IF EXISTS "Allow all community_alerts" ON community_alerts;
+DROP POLICY IF EXISTS "Allow all emergency_contacts" ON emergency_contacts;
+DROP POLICY IF EXISTS "Allow all incident_verifications" ON incident_verifications;
 
 -- Create policies
 CREATE POLICY "Allow all incidents" ON incidents FOR ALL USING (true);
@@ -113,6 +185,10 @@ CREATE POLICY "Allow all responders" ON responders FOR ALL USING (true);
 CREATE POLICY "Allow all assignments" ON incident_assignments FOR ALL USING (true);
 CREATE POLICY "Allow all sessions" ON escalated_sessions FOR ALL USING (true);
 CREATE POLICY "Allow all communications" ON communications FOR ALL USING (true);
+CREATE POLICY "Allow all spam_reports" ON spam_reports FOR ALL USING (true);
+CREATE POLICY "Allow all community_alerts" ON community_alerts FOR ALL USING (true);
+CREATE POLICY "Allow all emergency_contacts" ON emergency_contacts FOR ALL USING (true);
+CREATE POLICY "Allow all incident_verifications" ON incident_verifications FOR ALL USING (true);
 
 -- Updated_at trigger
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -149,6 +225,20 @@ END $$;
 DO $$
 BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE incidents;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE community_alerts;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE incident_verifications;
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
