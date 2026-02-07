@@ -1,4 +1,5 @@
 import { generateText } from 'ai'
+import { openai } from '@ai-sdk/openai'
 
 export async function POST(request: Request) {
   try {
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
 
     // Use AI to structure the transcription into actionable information
     const result = await generateText({
-      model: 'openai/gpt-4-turbo',
+      model: openai('gpt-4-turbo'),
       system:
         'You are an emergency dispatch AI. Convert responder speech into structured incident information. Return JSON with fields: transcription, keyInfo (array of key points), urgency (CRITICAL|HIGH|MEDIUM|LOW), requiredResources (array).',
       prompt: `Responder said: "${randomTranscription}". Structure this as dispatch information.`,
@@ -41,6 +42,10 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     console.error('Speech-to-text error:', error)
-    return Response.json({ error: 'Failed to transcribe audio' }, { status: 500 })
+    return Response.json({ 
+      transcription: 'Demo transcription - speech-to-text service not configured',
+      confidence: 0.0,
+      error: 'Failed to transcribe audio' 
+    }, { status: 200 })
   }
 }

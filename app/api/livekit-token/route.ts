@@ -22,7 +22,14 @@ export async function POST(request: Request) {
       )
     }
 
-    const at = new AccessToken(apiKey, apiSecret)
+    const at = new AccessToken(apiKey, apiSecret, {
+      identity: participantId || participantName,
+      metadata: JSON.stringify({
+        name: participantName,
+        role: 'responder',
+      }),
+    })
+    
     at.addGrant({
       roomJoin: true,
       room: roomName,
@@ -31,13 +38,7 @@ export async function POST(request: Request) {
       canSubscribe: true,
     })
 
-    at.identity = participantId || participantName
-    at.metadata = JSON.stringify({
-      name: participantName,
-      role: 'responder',
-    })
-
-    const token = at.toJwt()
+    const token = await at.toJwt()
 
     return Response.json({
       token,
