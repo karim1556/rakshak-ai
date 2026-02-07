@@ -3,13 +3,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { 
-  Mic, MicOff, X, Phone, Volume2, VolumeX, Loader2, 
+  Mic, MicOff, X, Phone, PhoneOff, PhoneCall, Volume2, VolumeX, Loader2, 
   CheckCircle2, Circle, Shield, AlertTriangle, Heart,
   Flame, Car, Users, ChevronRight, Video, VideoOff, Camera,
-  MapPin, AlertOctagon
+  MapPin, AlertOctagon, Radio
 } from 'lucide-react'
 import { useEmergencyStore } from '@/lib/emergency-store'
 import { supabase } from '@/lib/supabase'
+import { useCall } from '@/lib/use-call'
 
 type ConversationState = 'idle' | 'listening' | 'processing' | 'speaking'
 
@@ -62,6 +63,32 @@ export default function EmergencyPage() {
   const sosTapRef = useRef<number[]>([])
   const watchIdRef = useRef<number | null>(null)
   const lastLocationBroadcastRef = useRef<number>(0)
+
+  // Dispatch call state
+  const [dispatchCallActive, setDispatchCallActive] = useState(false)
+
+  const call = useCall({
+    sessionId: session?.id || '',
+    role: 'user',
+    onIncomingCall: () => {
+      setDispatchCallActive(true)
+      addMessage('system', '\ud83d\udcde Dispatch is connecting for live verification...')
+    },
+    onCallConnected: () => {
+      setDispatchCallActive(true)
+    },
+    onCallEnded: () => {
+      setDispatchCallActive(false)
+      addMessage('system', 'Verification call ended')
+    },
+  })
+
+  // Listen for incoming calls when escalated
+  useEffect(() => {
+    if (isEscalated && session?.id) {
+      call.listenForCalls()
+    }
+  }, [isEscalated, session?.id])
 
   // Auto-scroll messages
   useEffect(() => {
@@ -800,6 +827,19 @@ export default function EmergencyPage() {
                   <AlertTriangle className="h-4 w-4 text-amber-600" />
                   <span className="text-sm text-amber-800 font-medium">{msg.content}</span>
                 </div>
+              ) : msg.role === 'dispatch' ? (
+                <div className="max-w-[85%]">
+                  <div className="rounded-2xl px-5 py-3 shadow-sm bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Radio className="h-3 w-3 text-emerald-600" />
+                      <p className="text-[11px] font-semibold text-emerald-600">Dispatch Team</p>
+                    </div>
+                    <p className="text-[15px] leading-relaxed text-slate-800">{msg.content}</p>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1.5 px-2">
+                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
               ) : (
                 <div className={`max-w-[85%] ${msg.role === 'user' ? 'order-2' : ''}`}>
                   <div className={`rounded-2xl px-5 py-3 shadow-sm ${
@@ -955,16 +995,52 @@ export default function EmergencyPage() {
           <p className="text-center text-[10px] text-slate-400 mt-2">Triple-tap anywhere for silent SOS</p>
         </div>
 
-        {/* Escalated Banner */}
+        {/* Escalated / Dispatch Call Banner */}
         {isEscalated && (
-          <div className="absolute top-20 left-4 right-4 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-2xl p-4 z-20 animate-in slide-in-from-top shadow-xl shadow-red-200">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-                <Phone className="h-5 w-5 animate-pulse" />
-              </div>
-              <div>
-                <p className="font-semibold">Emergency Dispatch Connected</p>
-                <p className="text-sm text-red-100">Professional help is on the way</p>
+          <div className={`absolute top-20 left-4 right-4 z-20 animate-in slide-in-from-top`}>
+            <div className={`rounded-2xl p-4 shadow-xl ${
+              call.status === 'connected'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 shadow-emerald-200'
+                : 'bg-gradient-to-r from-red-500 to-red-600 shadow-red-200'
+            } text-white`}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                  {call.status === 'connected' ? (
+                    <PhoneCall className="h-5 w-5" />
+                  ) : call.status === 'ringing' || call.status === 'calling' ? (
+                    <Phone className="h-5 w-5 animate-pulse" />
+                  ) : (
+                    <Radio className="h-5 w-5 animate-pulse" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold">
+                    {call.status === 'connected' ? 'Live Verification Call' : 
+                     call.status === 'ringing' ? 'Dispatch Connecting...' :
+                     'Emergency Dispatch Connected'}
+                  </p>
+                  <p className={`text-sm ${
+                    call.status === 'connected' ? 'text-emerald-100' : 'text-red-100'
+                  }`}>
+                    {call.status === 'connected' ? `Call in progress \u2014 ${call.formattedDuration}` :
+                     call.status === 'ringing' ? 'Incoming call from dispatch...' :
+                     'Professional help is on the way'}
+                  </p>
+                </div>
+                {call.status === 'connected' && (
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={call.toggleMute}
+                      className={`p-2 rounded-lg transition-all ${
+                        call.isMuted ? 'bg-red-500/50' : 'bg-white/20 hover:bg-white/30'
+                      }`}>
+                      {call.isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                    </button>
+                    <button onClick={() => call.endCall()}
+                      className="p-2 bg-red-600 rounded-lg hover:bg-red-700 transition-all">
+                      <PhoneOff className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

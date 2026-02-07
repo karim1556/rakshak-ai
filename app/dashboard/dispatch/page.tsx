@@ -4,13 +4,15 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import {
-  ArrowLeft, MapPin, Phone, Clock, Send, CheckCircle2,
+  ArrowLeft, MapPin, Phone, PhoneOff, PhoneCall, Clock, Send, CheckCircle2,
   Heart, Flame, Car, Shield, AlertTriangle, Bell,
   Radio, UserCheck, ChevronRight, MessageSquare, Info,
-  FileText, Loader2, X, Volume2, Eye, Zap, Activity, Users
+  FileText, Loader2, X, Volume2, Eye, Zap, Activity, Users,
+  Mic, MicOff
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth-guard'
 import { supabase } from '@/lib/supabase'
+import { useCall } from '@/lib/use-call'
 
 const MapComponent = dynamic(() => import('@/components/map').then(m => ({ default: m.Map })), { ssr: false })
 
@@ -199,6 +201,29 @@ function DispatchContent() {
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [fetchSessions])
+
+  // WebRTC call hook
+  const call = useCall({
+    sessionId: selected?.id || '',
+    role: 'dispatch',
+    onCallConnected: () => {
+      // Add a system message
+      if (selected) {
+        fetch('/api/escalation', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: selected.id, message: '📞 Dispatch connected — live verification call in progress' }),
+        }).then(() => fetchSessions())
+      }
+    },
+    onCallEnded: () => {},
+  })
+
+  // Start a call to the selected session
+  const handleStartCall = async () => {
+    if (!selected) return
+    call.startCall()
+  }
 
   // Auto-scroll messages
   useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [selected?.messages])
@@ -460,6 +485,44 @@ function DispatchContent() {
                   </div>
                 </div>
                 <div className="flex gap-1.5">
+                  {/* Connect / Call button */}
+                  {selected.status !== 'resolved' && call.status === 'idle' && (
+                    <button onClick={handleStartCall}
+                      className="px-3 py-1.5 text-[11px] bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-lg transition-all hover:from-emerald-600 hover:to-teal-600 flex items-center gap-1.5 shadow-md shadow-emerald-200 font-semibold animate-pulse">
+                      <Phone className="h-3 w-3" />
+                      Connect
+                    </button>
+                  )}
+                  {(call.status === 'calling' || call.status === 'ringing') && (
+                    <button onClick={() => call.endCall()}
+                      className="px-3 py-1.5 text-[11px] bg-amber-50 border border-amber-200 text-amber-700 rounded-lg transition-all flex items-center gap-1.5 shadow-sm font-semibold">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Calling...
+                    </button>
+                  )}
+                  {call.status === 'connected' && (
+                    <>
+                      <div className="px-3 py-1.5 text-[11px] bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg flex items-center gap-2 shadow-sm font-semibold">
+                        <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                        <PhoneCall className="h-3 w-3" />
+                        {call.formattedDuration}
+                      </div>
+                      <button onClick={call.toggleMute}
+                        className={`px-2 py-1.5 text-[11px] rounded-lg transition-all flex items-center gap-1 shadow-sm font-medium border ${
+                          call.isMuted ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}>
+                        {call.isMuted ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3" />}
+                      </button>
+                      <button onClick={() => call.endCall()}
+                        className="px-2.5 py-1.5 text-[11px] bg-red-500 text-white rounded-lg transition-all hover:bg-red-600 flex items-center gap-1 shadow-sm font-semibold">
+                        <PhoneOff className="h-3 w-3" />
+                        End
+                      </button>
+                    </>
+                  )}
+
+                  <div className="w-px h-6 bg-slate-200" />
+
                   {(['medical', 'police', 'fire'] as const).map(type => {
                     const icons = { medical: Heart, police: Shield, fire: Flame }
                     const labels = { medical: 'EMS', police: 'Police', fire: 'Fire' }
@@ -487,6 +550,35 @@ function DispatchContent() {
                   )}
                 </div>
               </div>
+
+              {/* Live Call Banner */}
+              {call.status === 'connected' && (
+                <div className="mx-4 mt-3 p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl flex items-center gap-3 flex-shrink-0 shadow-sm">
+                  <div className="relative">
+                    <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center">
+                      <PhoneCall className="h-5 w-5 text-white" />
+                    </div>
+                    <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full animate-ping" />
+                    <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-bold text-emerald-800">Live Verification Call</p>
+                    <p className="text-[10px] text-emerald-600">Connected to caller — {call.formattedDuration}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={call.toggleMute}
+                      className={`p-2 rounded-lg transition-all ${
+                        call.isMuted ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                      }`}>
+                      {call.isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                    </button>
+                    <button onClick={() => call.endCall()}
+                      className="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all shadow-sm">
+                      <PhoneOff className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Quick Summary */}
               <QuickSummary session={selected} />
