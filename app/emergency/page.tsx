@@ -496,9 +496,50 @@ export default function EmergencyPage() {
         aiData.steps.forEach((s: any) => addStep(s.text, s.imageUrl))
       }
       
-      if (aiData.shouldEscalate) {
+      if (aiData.shouldEscalate && !useEmergencyStore.getState().session?.isEscalated) {
+        // Full escalation: push to Supabase so dispatch + department dashboards see it
         escalateToDispatch()
         addMessage('system', 'Connecting to emergency dispatch...')
+
+        const s = useEmergencyStore.getState().session!
+        const loc = locationRef.current || s.location
+        const snapshot = cameraStreamRef.current ? captureFrame() : null
+
+        fetch('/api/escalation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: s.id,
+            type: s.type || 'other',
+            severity: s.severity || 'MEDIUM',
+            summary: s.summary || 'Emergency',
+            location: loc,
+            messages: s.messages,
+            steps: s.steps,
+            risks: aiData.sessionInfo?.risks || [],
+            tacticalAdvice: aiData.sessionInfo?.tacticalAdvice || '',
+            imageSnapshot: snapshot,
+          }),
+        }).then(r => r.json()).then(data => {
+          if (data.success) {
+            addMessage('system', 'Dispatch team notified — help is on the way!')
+            speakText('Dispatch team has been notified. Help is on the way.')
+            // Auto-dispatch if we have location
+            if (loc?.lat && loc?.lng) {
+              fetch('/api/auto-dispatch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId: s.id, type: s.type, severity: s.severity, lat: loc.lat, lng: loc.lng }),
+              }).then(r => r.json()).then(dd => {
+                if (dd.dispatched?.length) {
+                  addMessage('system', `${dd.dispatched[0].name} dispatched — ETA ${dd.dispatched[0].eta} min`)
+                }
+              }).catch(() => {})
+            }
+          }
+        }).catch(err => {
+          console.error('Auto-escalation error:', err)
+        })
       }
       
       await speakText(aiData.response)
@@ -558,6 +599,8 @@ export default function EmergencyPage() {
           location: loc,
           messages: currentSession.messages,
           steps: currentSession.steps,
+          risks: currentSession.risks || [],
+          tacticalAdvice: currentSession.tacticalAdvice || '',
           imageSnapshot: imageBase64,
         }),
       })

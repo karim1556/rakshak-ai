@@ -98,6 +98,14 @@ ALTER TABLE incident_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE escalated_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE communications ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Allow all incidents" ON incidents;
+DROP POLICY IF EXISTS "Allow all responders" ON responders;
+DROP POLICY IF EXISTS "Allow all assignments" ON incident_assignments;
+DROP POLICY IF EXISTS "Allow all sessions" ON escalated_sessions;
+DROP POLICY IF EXISTS "Allow all communications" ON communications;
+
+-- Create policies
 CREATE POLICY "Allow all incidents" ON incidents FOR ALL USING (true);
 CREATE POLICY "Allow all responders" ON responders FOR ALL USING (true);
 CREATE POLICY "Allow all assignments" ON incident_assignments FOR ALL USING (true);
@@ -113,14 +121,69 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_incidents_updated_at ON incidents;
+DROP TRIGGER IF EXISTS update_responders_updated_at ON responders;
+DROP TRIGGER IF EXISTS update_escalated_updated_at ON escalated_sessions;
+
 CREATE TRIGGER update_incidents_updated_at BEFORE UPDATE ON incidents FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_responders_updated_at BEFORE UPDATE ON responders FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_escalated_updated_at BEFORE UPDATE ON escalated_sessions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE escalated_sessions;
-ALTER PUBLICATION supabase_realtime ADD TABLE communications;
-ALTER PUBLICATION supabase_realtime ADD TABLE incidents;
+-- Realtime (will error if already exists, but that's ok)
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE escalated_sessions;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE communications;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE incidents;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+-- User Profiles (links to auth.users)
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email TEXT UNIQUE NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('dispatch', 'police', 'medical', 'fire')),
+  full_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all profiles" ON profiles;
+CREATE POLICY "Allow all profiles" ON profiles FOR ALL USING (true);
+
+-- Trigger to auto-create profile on user signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, role, full_name)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'role', 'dispatch'),
+    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email)
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- Seed Responders
 INSERT INTO responders (name, role, unit_id, status, location_lat, location_lng) VALUES
@@ -134,3 +197,31 @@ INSERT INTO responders (name, role, unit_id, status, location_lat, location_lng)
   ('Fire Rescue Alpha', 'fire', 'FIRE-302', 'available', 28.6505, 77.2345),
   ('Rescue Team Delta', 'rescue', 'RES-401', 'available', 28.6181, 77.2024)
 ON CONFLICT (unit_id) DO NOTHING;
+
+-- ============================================================================
+-- DEMO ACCOUNTS SETUP
+-- ============================================================================
+-- After running this schema, create these demo accounts via Supabase Dashboard:
+-- Go to Authentication > Users > Add User (manually)
+-- OR use the signup endpoint in your app with these credentials:
+--
+-- 1. DISPATCH COORDINATOR
+--    Email: dispatch@rakshak.ai
+--    Password: Dispatch@2025
+--    Metadata: {"role": "dispatch", "full_name": "Dispatch Coordinator"}
+--
+-- 2. POLICE OFFICER
+--    Email: police@rakshak.ai
+--    Password: Police@2025
+--    Metadata: {"role": "police", "full_name": "Police Officer"}
+--
+-- 3. MEDICAL RESPONDER
+--    Email: medical@rakshak.ai
+--    Password: Medical@2025
+--    Metadata: {"role": "medical", "full_name": "Medical Responder"}
+--
+-- 4. FIRE RESPONDER
+--    Email: fire@rakshak.ai
+--    Password: Fire@2025
+--    Metadata: {"role": "fire", "full_name": "Fire Responder"}
+-- ============================================================================

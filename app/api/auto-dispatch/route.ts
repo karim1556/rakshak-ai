@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
         // Mark responder as busy
         await supabase
           .from('responders')
-          .update({ status: 'busy', current_incident_id: null })
+          .update({ status: 'busy' })
           .eq('id', r.id)
 
         dispatched.push({
@@ -95,6 +95,35 @@ export async function POST(req: NextRequest) {
           },
         })
         .eq('id', sessionId)
+
+      // Also update the incidents table so department dashboards see assignment
+      await supabase
+        .from('incidents')
+        .update({ status: 'assigned' })
+        .eq('reported_by', sessionId)
+
+      // Create incident_assignments records
+      const { data: incident } = await supabase
+        .from('incidents')
+        .select('id')
+        .eq('reported_by', sessionId)
+        .single()
+
+      if (incident) {
+        for (const d of dispatched) {
+          await supabase.from('incident_assignments').upsert({
+            incident_id: incident.id,
+            responder_id: d.id,
+            status: 'assigned',
+          }, { onConflict: 'incident_id,responder_id' })
+
+          // Link responder to the incident
+          await supabase
+            .from('responders')
+            .update({ current_incident_id: incident.id })
+            .eq('id', d.id)
+        }
+      }
     }
 
     return NextResponse.json({

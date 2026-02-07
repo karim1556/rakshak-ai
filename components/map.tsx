@@ -56,11 +56,11 @@ export function MapComponent({
 
     // Add new markers
     markers.forEach(({ position, popup, type }) => {
+      const bg = type === 'incident' ? '#ef4444' : '#3b82f6'
+      const label = type === 'incident' ? '!' : '•'
       const icon = L.divIcon({
         className: 'custom-marker',
-        html: `<div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg ${
-          type === 'incident' ? 'bg-red-500' : 'bg-blue-500'
-        }">${type === 'incident' ? '!' : '•'}</div>`,
+        html: `<div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.3);background:${bg}">${label}</div>`,
         iconSize: [32, 32],
         iconAnchor: [16, 16],
       })
@@ -83,8 +83,8 @@ export function MapComponent({
   return (
     <div 
       ref={mapRef} 
-      className={`w-full h-full min-h-[300px] rounded-xl overflow-hidden ${className}`}
-      style={{ zIndex: 0 }}
+      className={`w-full h-full rounded-xl overflow-hidden ${className}`}
+      style={{ zIndex: 0, minHeight: '200px' }}
     />
   )
 }

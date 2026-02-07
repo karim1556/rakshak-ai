@@ -68,25 +68,43 @@ export async function POST(req: NextRequest) {
       throw error
     }
 
-    // Also create incident in incidents table for dashboards
-    await supabase.from('incidents').insert({
+    // Also create incident in incidents table for department dashboards
+    const userMessages = session.messages?.filter((m: any) => m.role === 'user').map((m: any) => m.content).join(' ') || 'Emergency reported via AI assistant'
+    const stepTexts = (session.steps || []).map((s: any) => typeof s === 'string' ? s : s.text || s.content || '').filter(Boolean)
+
+    const { data: incident, error: incError } = await supabase.from('incidents').insert({
       type: session.type || 'other',
       summary: session.summary || 'Emergency',
-      description: session.messages?.filter((m: any) => m.role === 'user').map((m: any) => m.content).join(' ') || 'Emergency reported via AI assistant',
+      description: userMessages,
       severity: session.severity || 'MEDIUM',
       status: 'active',
+      victims: session.victims || 1,
+      risks: session.risks || [],
+      steps: stepTexts,
+      tactical_advice: session.tacticalAdvice || '',
       location_lat: session.location?.lat || null,
       location_lng: session.location?.lng || null,
       location_address: session.location?.address || null,
       reported_by: session.id,
       language: session.language || 'en',
-    }).then(({ error }) => {
-      if (error) console.error('Incident insert error:', error)
-    })
+    }).select('id').single()
+
+    if (incError) {
+      console.error('Incident insert error:', incError)
+    }
+
+    // Link the incident ID back to the escalated session for cross-reference
+    const incidentId = incident?.id || null
+    if (incidentId) {
+      await supabase.from('escalated_sessions')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', session.id)
+    }
 
     return NextResponse.json({
       success: true,
       sessionId: session.id,
+      incidentId,
       message: 'Session escalated to dispatch',
     })
   } catch (error) {

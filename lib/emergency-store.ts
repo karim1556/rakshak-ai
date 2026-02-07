@@ -23,6 +23,9 @@ export interface EmergencySession {
   type?: 'medical' | 'fire' | 'safety' | 'accident' | 'other'
   severity?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
   summary?: string
+  risks?: string[]
+  tacticalAdvice?: string
+  victims?: number
   location?: { lat: number; lng: number; address?: string }
   messages: Message[]
   steps: EmergencyStep[]
@@ -34,6 +37,7 @@ export interface EmergencySession {
   }
   createdAt: number
   escalatedAt?: number
+  isEscalated?: boolean
 }
 
 interface EmergencyStore {
@@ -56,7 +60,7 @@ interface EmergencyStore {
   addStep: (text: string, imageUrl?: string) => void
   completeStep: (stepId: string) => void
   
-  updateSessionInfo: (info: Partial<Pick<EmergencySession, 'type' | 'severity' | 'summary' | 'location'>>) => void
+  updateSessionInfo: (info: Partial<Pick<EmergencySession, 'type' | 'severity' | 'summary' | 'location' | 'risks' | 'tacticalAdvice' | 'victims'>>) => void
   
   escalateToDispatch: () => void
   connectWithDispatch: (responder: EmergencySession['assignedResponder']) => void
@@ -187,6 +191,7 @@ export const useEmergencyStore = create<EmergencyStore>()(
             ...session,
             status: 'escalated',
             escalatedAt: Date.now(),
+            isEscalated: true,
           },
           isEscalated: true,
         })

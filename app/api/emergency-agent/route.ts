@@ -11,6 +11,9 @@ interface AIResponse {
     type?: 'medical' | 'fire' | 'safety' | 'accident' | 'other'
     severity?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
     summary?: string
+    risks?: string[]
+    tacticalAdvice?: string
+    victims?: number
   }
   steps?: Array<{
     text: string
@@ -104,7 +107,10 @@ JSON RESPONSE FORMAT:
   "sessionInfo": {
     "type": "medical|fire|safety|accident|other",
     "severity": "CRITICAL|HIGH|MEDIUM|LOW",
-    "summary": "2-3 words"
+    "summary": "2-3 words",
+    "risks": ["list of identified risks/dangers"],
+    "tacticalAdvice": "Key safety/tactical advice for responders",
+    "victims": 1
   },
   "steps": [{"text": "Clear actionable step based on your advice"}],
   "shouldEscalate": false,

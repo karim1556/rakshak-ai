@@ -52,7 +52,7 @@ Be precise and focused on actionable information for emergency responders.`
     // Fallback for demo
     return Response.json({
       severity: 'HIGH',
-      incidentType: emergencyType || 'Unknown Emergency',
+      incidentType: 'Unknown Emergency',
       respondersNeeded: ['Paramedics', 'Police Officers'],
       recommendedResponse: 'Dispatch emergency services immediately',
       estimatedResponseTime: '5-8 minutes',
