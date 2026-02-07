@@ -1,6 +1,3 @@
-import { generateText } from 'ai'
-import { openai } from '@ai-sdk/openai'
-
 export async function POST(request: Request) {
   try {
     const formData = await request.formData()
@@ -10,42 +7,45 @@ export async function POST(request: Request) {
       return Response.json({ error: 'No audio file provided' }, { status: 400 })
     }
 
-    // In a real implementation, you would:
-    // 1. Convert the audio to base64 or appropriate format
-    // 2. Use a speech-to-text service (OpenAI Whisper, Google Cloud Speech-to-Text, etc.)
-    // 3. Return the transcribed text
+    // Check file size
+    if (audioFile.size < 1000) {
+      return Response.json({ 
+        text: '',
+        error: 'Recording too short' 
+      }, { status: 400 })
+    }
 
-    // For demo, we'll return a simulated transcription
-    const simulatedTranscriptions = [
-      'We have a patient with severe chest pain and difficulty breathing',
-      'Multiple injuries reported at the intersection',
-      'The scene is secure, we need medical assistance immediately',
-      'Patient is unconscious, starting CPR now',
-      'Scene assessment complete, requesting additional units',
-    ]
+    const arrayBuffer = await audioFile.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
 
-    const randomTranscription =
-      simulatedTranscriptions[Math.floor(Math.random() * simulatedTranscriptions.length)]
-
-    // Use AI to structure the transcription into actionable information
-    const result = await generateText({
-      model: openai('gpt-4-turbo'),
-      system:
-        'You are an emergency dispatch AI. Convert responder speech into structured incident information. Return JSON with fields: transcription, keyInfo (array of key points), urgency (CRITICAL|HIGH|MEDIUM|LOW), requiredResources (array).',
-      prompt: `Responder said: "${randomTranscription}". Structure this as dispatch information.`,
+    // Use Deepgram for transcription
+    const response = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${process.env.DEEPGRAM_API_KEY}`,
+        'Content-Type': audioFile.type || 'audio/webm',
+      },
+      body: buffer,
     })
+
+    if (!response.ok) {
+      const error = await response.text()
+      console.error('Deepgram error:', error)
+      throw new Error('Transcription failed')
+    }
+
+    const data = await response.json()
+    const transcript = data.results?.channels?.[0]?.alternatives?.[0]?.transcript || ''
 
     return Response.json({
-      transcription: randomTranscription,
-      confidence: 0.95,
-      analysis: result.text,
+      text: transcript,
+      confidence: data.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0,
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Speech-to-text error:', error)
     return Response.json({ 
-      transcription: 'Demo transcription - speech-to-text service not configured',
-      confidence: 0.0,
+      text: '',
       error: 'Failed to transcribe audio' 
-    }, { status: 200 })
+    }, { status: 500 })
   }
 }
