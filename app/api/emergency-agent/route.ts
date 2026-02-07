@@ -18,14 +18,15 @@ interface AIResponse {
   }>
   shouldEscalate: boolean
   needsMoreInfo: boolean
+  visionAnalysis?: string
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { sessionId, message, conversationHistory = [], currentSteps = [] } = await req.json()
+    const { sessionId, message, conversationHistory = [], currentSteps = [], imageBase64 } = await req.json()
 
-    if (!message) {
-      return NextResponse.json({ error: 'Message is required' }, { status: 400 })
+    if (!message && !imageBase64) {
+      return NextResponse.json({ error: 'Message or image is required' }, { status: 400 })
     }
 
     // Build conversation context
@@ -38,57 +39,108 @@ export async function POST(req: NextRequest) {
       .map((s: any, i: number) => `${i + 1}. ${s.text} ${s.completed ? '(DONE)' : ''}`)
       .join('\n')
 
-    const systemPrompt = `You are an AI emergency response assistant for Rakshak AI, similar to Prepared 911. You help people during emergencies.
+    const systemPrompt = `You are Rakshak, an AI emergency assistant having a voice conversation. Be a calm, knowledgeable friend who guides people through tough situations.
 
-GUIDELINES:
-- Be calm, reassuring, but direct
-- Ask focused questions (location, people affected, dangers)
-- Give ONE clear instruction at a time
-- For medical: Check breathing, consciousness, bleeding
-- For fires: Prioritize evacuation, never re-enter
-- For accidents: Check injuries, ensure scene safety
-- For crimes: User safety first
+${imageBase64 ? `IMPORTANT - VIDEO/IMAGE ANALYSIS:
+You have been given a live camera image from the scene. Analyze it carefully to:
+- Assess the situation visually (injuries, fire, danger, etc.)
+- Provide specific guidance based on what you SEE
+- Reference visual details: "I can see...", "It looks like...", "From the image..."
+- Combine visual analysis with what the user tells you
+` : ''}
 
-ESCALATE (shouldEscalate = true) when:
-- Unconscious/not breathing
-- Active fire/severe smoke  
-- Being attacked/immediate danger
-- Serious injuries (heavy bleeding, visible bones, severe burns)
-- Any life-threatening situation
+CONVERSATION STYLE:
+- Keep responses SHORT (2-3 sentences max)
+- Be warm and natural - use contractions
+- End with a question to keep dialogue going
+- Show empathy: "That's scary", "I hear you", "You're doing great"
+${imageBase64 ? '- Reference what you see in the image when relevant' : ''}
 
-RESPOND IN THIS EXACT JSON FORMAT:
+CRITICAL RULE - ALWAYS GIVE A STEP:
+When you give ANY advice or instruction, you MUST add it to the steps array. Every actionable suggestion = a step.
+
+EXAMPLES:
+User: "I'm being chased by a car"
+Response: "That's really scary. First, try to get somewhere safe - a store, restaurant, anywhere with people. Are you near any buildings?"
+Steps: [{"text": "Get to a safe public place with other people"}]
+
+User: "Someone collapsed"  
+Response: "I'm here with you. Can you check if they're breathing - is their chest moving?"
+Steps: [{"text": "Check if the person is breathing"}]
+
+User: "There's a fire in my kitchen"
+Response: "Okay, first get everyone out of the house right now. Is everyone able to get out safely?"
+Steps: [{"text": "Evacuate everyone from the house immediately"}]
+
+${imageBase64 ? `WITH IMAGE EXAMPLES:
+If you see someone unconscious: "I can see the person on the ground. They appear unconscious. Let's check if they're breathing - can you look at their chest?"
+
+If you see a fire: "I can see flames in the image. Get everyone out immediately and move away from the building. Are you at a safe distance?"
+
+If you see an injury: "I can see what looks like a wound on their arm. We need to stop the bleeding - do you have any clean cloth nearby?"
+` : ''}
+
+STEP RULES:
+- ALWAYS include a step when giving advice (this is mandatory!)
+- One step at a time, don't overwhelm
+- Make steps clear and actionable
+- Check existing steps to avoid duplicates
+
+ESCALATION - shouldEscalate = false ALWAYS unless:
+- User says "call 911", "call police", "connect me to help", "I need emergency services"
+- User EXPLICITLY requests professional help
+
+DO NOT ESCALATE for:
+- Being chased (guide them to safety first)
+- Someone collapsed (guide CPR/first aid)
+- Fire (guide evacuation)
+- Any emergency where you can still help guide them
+
+shouldEscalate is ONLY for when the user explicitly wants to connect to dispatch. Default is ALWAYS false.
+
+JSON RESPONSE FORMAT:
 {
-  "response": "Your spoken response to the user",
+  "response": "Short empathetic response with guidance, ending with question",
   "sessionInfo": {
     "type": "medical|fire|safety|accident|other",
     "severity": "CRITICAL|HIGH|MEDIUM|LOW",
-    "summary": "Brief one-line summary"
+    "summary": "2-3 words"
   },
-  "steps": [
-    {"text": "Clear instruction", "imageUrl": "optional image URL"}
-  ],
+  "steps": [{"text": "Clear actionable step based on your advice"}],
   "shouldEscalate": false,
-  "needsMoreInfo": true
-}
+  "needsMoreInfo": true${imageBase64 ? ',\n  "visionAnalysis": "Brief description of what you observed in the image"' : ''}
+}`
 
-Only include NEW steps not already given. Use these image URLs when relevant:
-- CPR: https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=400
-- First aid: https://images.unsplash.com/photo-1603398938378-e54eab446dde?w=400
-- Fire evacuation: https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=400`
-
-    const userMessage = `Session: ${sessionId}
+    const userMessageText = `Session: ${sessionId}
 ${conversationContext ? `\nConversation:\n${conversationContext}` : ''}
 ${existingSteps ? `\nExisting steps:\n${existingSteps}` : ''}
 
-User says: "${message}"
+User says: "${message || 'Please analyze the image I\'m sharing'}"
+${imageBase64 ? '\n[User has shared a live camera image - analyze it and incorporate your observations]' : ''}
 
 Respond with valid JSON only.`
+
+    // Build message content - with or without image
+    let messageContent: any = userMessageText
+    
+    if (imageBase64) {
+      messageContent = [
+        { type: 'text', text: userMessageText },
+        { 
+          type: 'image_url', 
+          image_url: { 
+            url: imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`,
+            detail: 'high'
+          } 
+        }
+      ]
+    }
 
     const completion = await client.chat.completions.create({
       model: 'gpt-4o',
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
+        { role: 'user', content: messageContent }
       ],
       response_format: { type: 'json_object' },
       temperature: 0.7,

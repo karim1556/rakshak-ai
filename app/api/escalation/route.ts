@@ -1,43 +1,94 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-// In-memory store for demo (use Redis/database in production)
-const escalatedSessions: Map<string, any> = new Map()
+import { createServerClient } from '@/lib/supabase'
 
 export async function GET() {
-  // Return all escalated sessions
-  const sessions = Array.from(escalatedSessions.values())
-    .sort((a, b) => b.escalatedAt - a.escalatedAt)
-  
+  const supabase = createServerClient()
+  const { data, error } = await supabase
+    .from('escalated_sessions')
+    .select('*')
+    .order('escalated_at', { ascending: false })
+
+  if (error) {
+    console.error('Fetch sessions error:', error)
+    return NextResponse.json({ sessions: [] })
+  }
+
+  // Transform DB rows to match frontend shape
+  const sessions = (data || []).map((row: any) => ({
+    id: row.id,
+    type: row.type,
+    severity: row.severity,
+    summary: row.summary,
+    status: row.status,
+    location: row.location_address ? {
+      address: row.location_address,
+      lat: row.location_lat ? Number(row.location_lat) : undefined,
+      lng: row.location_lng ? Number(row.location_lng) : undefined,
+    } : undefined,
+    messages: row.messages || [],
+    steps: row.steps || [],
+    assignedResponder: row.assigned_responder,
+    escalatedAt: new Date(row.escalated_at).getTime(),
+    language: row.language,
+    imageSnapshot: row.image_snapshot,
+    qaReport: row.qa_report,
+  }))
+
   return NextResponse.json({ sessions })
 }
 
 export async function POST(req: NextRequest) {
+  const supabase = createServerClient()
+
   try {
     const session = await req.json()
-    
     if (!session.id) {
       return NextResponse.json({ error: 'Session ID required' }, { status: 400 })
     }
-    
-    // Store the escalated session
-    escalatedSessions.set(session.id, {
-      ...session,
-      escalatedAt: Date.now(),
+
+    const { error } = await supabase.from('escalated_sessions').upsert({
+      id: session.id,
+      type: session.type || 'other',
+      severity: session.severity || 'MEDIUM',
+      summary: session.summary || 'Emergency',
       status: 'escalated',
+      location_lat: session.location?.lat || null,
+      location_lng: session.location?.lng || null,
+      location_address: session.location?.address || null,
+      messages: session.messages || [],
+      steps: session.steps || [],
+      priority: session.severity === 'CRITICAL' ? 1 : session.severity === 'HIGH' ? 2 : 3,
+      language: session.language || 'en',
+      image_snapshot: session.imageSnapshot || null,
+      escalated_at: new Date().toISOString(),
     })
-    
-    // In production, this would:
-    // 1. Store in database
-    // 2. Send push notification to dispatchers
-    // 3. Trigger WebSocket event
-    // 4. Store conversation in mem0 for context
-    
-    return NextResponse.json({ 
-      success: true, 
+
+    if (error) {
+      console.error('Insert error:', error)
+      throw error
+    }
+
+    // Also create incident in incidents table for dashboards
+    await supabase.from('incidents').insert({
+      type: session.type || 'other',
+      summary: session.summary || 'Emergency',
+      description: session.messages?.filter((m: any) => m.role === 'user').map((m: any) => m.content).join(' ') || 'Emergency reported via AI assistant',
+      severity: session.severity || 'MEDIUM',
+      status: 'active',
+      location_lat: session.location?.lat || null,
+      location_lng: session.location?.lng || null,
+      location_address: session.location?.address || null,
+      reported_by: session.id,
+      language: session.language || 'en',
+    }).then(({ error }) => {
+      if (error) console.error('Incident insert error:', error)
+    })
+
+    return NextResponse.json({
+      success: true,
       sessionId: session.id,
-      message: 'Session escalated to dispatch'
+      message: 'Session escalated to dispatch',
     })
-    
   } catch (error) {
     console.error('Escalation error:', error)
     return NextResponse.json({ error: 'Failed to escalate' }, { status: 500 })
@@ -45,38 +96,52 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const supabase = createServerClient()
+
   try {
     const { sessionId, status, assignedResponder, message } = await req.json()
-    
-    const session = escalatedSessions.get(sessionId)
-    if (!session) {
+
+    // Get current session
+    const { data: current } = await supabase
+      .from('escalated_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .single()
+
+    if (!current) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
-    
-    // Update session
-    const updated = {
-      ...session,
-      status: status || session.status,
-      assignedResponder: assignedResponder || session.assignedResponder,
-    }
-    
-    // Add message if provided
+
+    const updates: any = { updated_at: new Date().toISOString() }
+    if (status) updates.status = status
+    if (assignedResponder) updates.assigned_responder = assignedResponder
+
+    // Add message
     if (message) {
-      updated.messages = [
-        ...(updated.messages || []),
-        {
-          id: `msg-${Date.now()}`,
-          role: 'dispatch',
-          content: message,
-          timestamp: Date.now(),
-        }
-      ]
+      const messages = [...(current.messages as any[] || []), {
+        id: `msg-${Date.now()}`,
+        role: 'dispatch',
+        content: message,
+        timestamp: Date.now(),
+      }]
+      updates.messages = messages
+
+      // Also save to communications table for realtime
+      await supabase.from('communications').insert({
+        session_id: sessionId,
+        sender_role: 'dispatch',
+        content: message,
+      })
     }
-    
-    escalatedSessions.set(sessionId, updated)
-    
-    return NextResponse.json({ success: true, session: updated })
-    
+
+    const { error } = await supabase
+      .from('escalated_sessions')
+      .update(updates)
+      .eq('id', sessionId)
+
+    if (error) throw error
+
+    return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Update error:', error)
     return NextResponse.json({ error: 'Failed to update' }, { status: 500 })
@@ -84,12 +149,13 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const supabase = createServerClient()
   const { searchParams } = new URL(req.url)
   const sessionId = searchParams.get('sessionId')
-  
+
   if (sessionId) {
-    escalatedSessions.delete(sessionId)
+    await supabase.from('escalated_sessions').delete().eq('id', sessionId)
   }
-  
+
   return NextResponse.json({ success: true })
 }

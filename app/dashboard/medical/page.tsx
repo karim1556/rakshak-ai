@@ -2,359 +2,216 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { 
-  ArrowLeft, Clock, AlertTriangle, Users, CheckCircle, Activity,
-  Phone, Navigation, Heart, Stethoscope, Ambulance, TrendingUp,
-  Bell, MoreVertical, MapPin, Timer
-} from 'lucide-react'
-import { useIncidentStore, Incident } from '@/lib/store'
+import dynamic from 'next/dynamic'
+import { ArrowLeft, Heart, AlertTriangle, MapPin, Loader2, UserCheck, Clock, Activity } from 'lucide-react'
+import { AuthGuard } from '@/components/auth-guard'
+import { supabase } from '@/lib/supabase'
 
-export default function MedicalDashboard() {
-  const { incidents, assignResponder, resolveIncident } = useIncidentStore()
-  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null)
-  const [filter, setFilter] = useState<'all' | 'active' | 'assigned'>('all')
+const MapComponent = dynamic(() => import('@/components/map').then(m => ({ default: m.Map })), { ssr: false })
 
-  // Filter incidents for medical relevance
-  const medicalIncidents = incidents.filter(inc => 
-    inc.type === 'medical' || inc.type === 'accident' || inc.type === 'other'
-  )
+function MedicalContent() {
+  const [incidents, setIncidents] = useState<any[]>([])
+  const [responders, setResponders] = useState<any[]>([])
+  const [selected, setSelected] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
-  const filteredIncidents = filter === 'all' 
-    ? medicalIncidents 
-    : medicalIncidents.filter(inc => inc.status === filter)
-
-  const activeCount = medicalIncidents.filter(i => i.status === 'active').length
-  const assignedCount = medicalIncidents.filter(i => i.status === 'assigned').length
-  const resolvedCount = medicalIncidents.filter(i => i.status === 'resolved').length
-  const criticalCount = medicalIncidents.filter(i => i.severity === 'CRITICAL').length
+  const load = async () => {
+    const [{ data: inc }, { data: resp }] = await Promise.all([
+      supabase.from('incidents').select('*').in('type', ['medical', 'accident']).neq('status', 'resolved').order('created_at', { ascending: false }),
+      supabase.from('responders').select('*').in('role', ['medical', 'rescue']),
+    ])
+    setIncidents(inc || [])
+    setResponders(resp || [])
+    setLoading(false)
+  }
 
   useEffect(() => {
-    if (filteredIncidents.length > 0 && !selectedIncident) {
-      setSelectedIncident(filteredIncidents[0])
-    }
-  }, [filteredIncidents, selectedIncident])
+    load()
+    const ch = supabase.channel('medical-dash')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, () => load())
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [])
 
-  const getSeverityConfig = (severity: string) => {
-    switch (severity) {
-      case 'CRITICAL': return { bg: 'bg-red-500', bgLight: 'bg-red-50', text: 'text-red-700', border: 'border-red-200' }
-      case 'HIGH': return { bg: 'bg-orange-500', bgLight: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200' }
-      case 'MEDIUM': return { bg: 'bg-yellow-500', bgLight: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-200' }
-      default: return { bg: 'bg-green-500', bgLight: 'bg-green-50', text: 'text-green-700', border: 'border-green-200' }
-    }
+  const available = responders.filter(r => r.status === 'available').length
+  const active = incidents.filter(i => i.status === 'active').length
+  const critical = incidents.filter(i => i.severity === 'CRITICAL').length
+
+  const sevClass = (s: string) =>
+    s === 'CRITICAL' ? 'text-red-400 bg-red-500/10' :
+    s === 'HIGH' ? 'text-orange-400 bg-orange-500/10' :
+    'text-yellow-400 bg-yellow-500/10'
+
+  const markers = [
+    ...incidents.filter(i => i.location_lat && i.location_lng).map(i => ({
+      position: [Number(i.location_lat), Number(i.location_lng)] as [number, number],
+      popup: `<b>${i.summary || 'Medical Emergency'}</b>`,
+      type: 'incident' as const
+    })),
+    ...responders.filter(r => r.location_lat && r.location_lng).map(r => ({
+      position: [Number(r.location_lat), Number(r.location_lng)] as [number, number],
+      popup: `<b>${r.name}</b>`,
+      type: 'responder' as const
+    }))
+  ]
+
+  const handleAssign = async (id: string) => {
+    const freeUnit = responders.find(r => r.status === 'available')
+    if (!freeUnit) return
+    await Promise.all([
+      supabase.from('incidents').update({ status: 'assigned' }).eq('id', id),
+      supabase.from('responders').update({ status: 'busy' }).eq('id', freeUnit.id),
+    ])
+    load()
   }
 
-  const handleAssign = (incidentId: string) => {
-    assignResponder(incidentId, 'MEDICAL-UNIT-1')
-  }
-
-  const handleResolve = (incidentId: string) => {
-    resolveIncident(incidentId)
-    setSelectedIncident(null)
-  }
-
-  const formatTime = (timestamp: number) => {
-    const diff = Date.now() - timestamp
-    const minutes = Math.floor(diff / 60000)
-    if (minutes < 1) return 'Just now'
-    if (minutes < 60) return `${minutes}m ago`
-    return `${Math.floor(minutes / 60)}h ago`
+  const handleResolve = async (id: string) => {
+    await supabase.from('incidents').update({ status: 'resolved' }).eq('id', id)
+    setSelected(null)
+    load()
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="flex items-center justify-between py-4">
-            <div className="flex items-center gap-4">
-              <Link href="/" className="p-2 -ml-2 hover:bg-slate-100 rounded-xl transition-colors">
-                <ArrowLeft className="h-5 w-5 text-slate-600" />
-              </Link>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-pink-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-500/20">
-                  <Heart className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <h1 className="font-bold text-slate-900">Medical Command</h1>
-                  <p className="text-xs text-slate-500">Emergency Medical Services</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <button className="relative p-2 hover:bg-slate-100 rounded-xl transition-colors">
-                <Bell className="h-5 w-5 text-slate-600" />
-                {criticalCount > 0 && (
-                  <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
-                )}
-              </button>
-              <div className="flex items-center gap-2 px-3 py-2 bg-green-50 rounded-xl border border-green-200">
-                <Ambulance className="h-4 w-4 text-green-600" />
-                <span className="text-sm font-medium text-green-700">Unit 1 Online</span>
-              </div>
-            </div>
-          </div>
+    <div className="h-screen bg-zinc-950 text-white flex flex-col">
+      <header className="h-12 border-b border-zinc-800/50 flex items-center justify-between px-4 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <Link href="/" className="p-1 hover:bg-zinc-800 rounded"><ArrowLeft className="h-4 w-4 text-zinc-500" /></Link>
+          <Heart className="h-4 w-4 text-rose-400" />
+          <span className="text-sm font-medium">Medical Command</span>
+        </div>
+        <div className="flex gap-4 text-[11px] text-zinc-500">
+          <span>{active} active</span>
+          {critical > 0 && <span className="text-red-400">{critical} critical</span>}
+          <span className="text-green-400">{available}/{responders.length} units ready</span>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
-              </div>
-              <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded-full">Live</span>
+      <div className="flex flex-1 overflow-hidden">
+        <div className="w-64 border-r border-zinc-800/50 flex flex-col flex-shrink-0">
+          <div className="grid grid-cols-3 gap-2 p-3 border-b border-zinc-800/30">
+            <div className="bg-zinc-900 rounded-lg p-2 text-center">
+              <p className="text-lg font-bold text-rose-400">{active}</p>
+              <p className="text-[9px] text-zinc-600 uppercase tracking-wider">Active</p>
             </div>
-            <p className="text-3xl font-bold text-slate-900">{activeCount}</p>
-            <p className="text-sm text-slate-500">Active Emergencies</p>
+            <div className="bg-zinc-900 rounded-lg p-2 text-center">
+              <p className="text-lg font-bold text-red-400">{critical}</p>
+              <p className="text-[9px] text-zinc-600 uppercase tracking-wider">Critical</p>
+            </div>
+            <div className="bg-zinc-900 rounded-lg p-2 text-center">
+              <p className="text-lg font-bold text-green-400">{available}</p>
+              <p className="text-[9px] text-zinc-600 uppercase tracking-wider">Ready</p>
+            </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
-                <Activity className="h-5 w-5 text-blue-600" />
-              </div>
-              <TrendingUp className="h-4 w-4 text-green-500" />
-            </div>
-            <p className="text-3xl font-bold text-slate-900">{assignedCount}</p>
-            <p className="text-sm text-slate-500">In Progress</p>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
-                <CheckCircle className="h-5 w-5 text-green-600" />
-              </div>
-            </div>
-            <p className="text-3xl font-bold text-slate-900">{resolvedCount}</p>
-            <p className="text-sm text-slate-500">Resolved Today</p>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center">
-                <Timer className="h-5 w-5 text-amber-600" />
-              </div>
-            </div>
-            <p className="text-3xl font-bold text-slate-900">4.2<span className="text-lg text-slate-400">min</span></p>
-            <p className="text-sm text-slate-500">Avg Response Time</p>
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 text-zinc-600 animate-spin" /></div>
+            ) : incidents.length === 0 ? (
+              <p className="text-[11px] text-zinc-600 text-center py-12">No active incidents</p>
+            ) : incidents.map(inc => (
+              <button
+                key={inc.id}
+                onClick={() => setSelected(inc)}
+                className={`w-full p-3 text-left border-b border-zinc-800/20 transition-colors ${selected?.id === inc.id ? 'bg-zinc-800/50' : 'hover:bg-zinc-900/50'}`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  {inc.severity === 'CRITICAL' ? (
+                    <Activity className="h-3 w-3 text-red-400 animate-pulse" />
+                  ) : (
+                    <AlertTriangle className="h-3 w-3 text-orange-400" />
+                  )}
+                  <span className="text-xs font-medium truncate flex-1">{inc.summary || 'Medical Emergency'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[9px] px-1 py-0.5 rounded ${sevClass(inc.severity)}`}>{inc.severity}</span>
+                  <span className="text-[9px] text-zinc-600">{inc.type}</span>
+                </div>
+                {inc.location_address && (
+                  <p className="text-[9px] text-zinc-600 mt-1 flex items-center gap-1 truncate"><MapPin className="h-2.5 w-2.5 flex-shrink-0" />{inc.location_address.split(',')[0]}</p>
+                )}
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Incidents List */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-              {/* Section Header */}
-              <div className="p-4 border-b border-slate-100">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="font-semibold text-slate-900">Incoming Calls</h2>
-                  <span className="text-xs text-slate-500">{filteredIncidents.length} total</span>
-                </div>
-                {/* Filters */}
-                <div className="flex gap-2">
-                  {['all', 'active', 'assigned'].map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => setFilter(f as any)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                        filter === f 
-                          ? 'bg-slate-900 text-white shadow-md' 
-                          : 'text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      {f.charAt(0).toUpperCase() + f.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Incident List */}
-              <div className="divide-y divide-slate-100 max-h-[calc(100vh-400px)] overflow-y-auto">
-                {filteredIncidents.length === 0 ? (
-                  <div className="p-12 text-center">
-                    <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                      <Stethoscope className="h-8 w-8 text-slate-400" />
-                    </div>
-                    <p className="text-slate-500 font-medium">No incidents found</p>
-                    <p className="text-sm text-slate-400 mt-1">You&apos;re all caught up!</p>
-                  </div>
-                ) : (
-                  filteredIncidents.map((incident) => {
-                    const severity = getSeverityConfig(incident.severity)
-                    return (
-                      <button
-                        key={incident.id}
-                        onClick={() => setSelectedIncident(incident)}
-                        className={`w-full p-4 text-left transition-all hover:bg-slate-50 ${
-                          selectedIncident?.id === incident.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className={`w-3 h-3 rounded-full ${severity.bg} mt-1.5 flex-shrink-0`} />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="font-medium text-slate-900 text-sm truncate">{incident.summary}</span>
-                              <span className="text-xs text-slate-400 flex-shrink-0 ml-2">{formatTime(incident.timestamp)}</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className="flex items-center gap-1 text-xs text-slate-500">
-                                <Users className="h-3 w-3" />
-                                {incident.victims}
-                              </span>
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                incident.status === 'active' ? 'bg-red-100 text-red-700' :
-                                incident.status === 'assigned' ? 'bg-blue-100 text-blue-700' :
-                                'bg-green-100 text-green-700'
-                              }`}>
-                                {incident.status}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    )
-                  })
-                )}
-              </div>
-            </div>
+        <div className="flex-1 flex flex-col">
+          <div className="h-52 border-b border-zinc-800/50">
+            <MapComponent markers={markers} zoom={12} />
           </div>
 
-          {/* Incident Details */}
-          <div className="lg:col-span-2">
-            {selectedIncident ? (
-              <div className="space-y-6">
-                {/* Incident Header Card */}
-                <div className={`rounded-2xl border overflow-hidden ${getSeverityConfig(selectedIncident.severity).bgLight} ${getSeverityConfig(selectedIncident.severity).border}`}>
-                  <div className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className={`px-3 py-1 rounded-lg text-sm font-semibold text-white ${getSeverityConfig(selectedIncident.severity).bg}`}>
-                            {selectedIncident.severity}
-                          </span>
-                          <span className="text-xs text-slate-500 font-mono">{selectedIncident.id}</span>
-                        </div>
-                        <h2 className="text-2xl font-bold text-slate-900">{selectedIncident.summary}</h2>
-                      </div>
-                      <button className="p-2 hover:bg-white/50 rounded-lg transition-colors">
-                        <MoreVertical className="h-5 w-5 text-slate-400" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-6 text-sm">
-                      <span className="flex items-center gap-2 text-slate-600">
-                        <Clock className="h-4 w-4" />
-                        {formatTime(selectedIncident.timestamp)}
-                      </span>
-                      <span className="flex items-center gap-2 text-slate-600">
-                        <Users className="h-4 w-4" />
-                        {selectedIncident.victims} victim{selectedIncident.victims !== 1 ? 's' : ''}
-                      </span>
-                      <span className="flex items-center gap-2 text-slate-600">
-                        <MapPin className="h-4 w-4" />
-                        Location accessed
-                      </span>
+          <div className="flex-1 overflow-y-auto p-4">
+            {selected ? (
+              <div className="space-y-3 max-w-xl">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold">{selected.summary || 'Medical Emergency'}</h2>
+                    <div className="flex gap-1 mt-1">
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${sevClass(selected.severity)}`}>{selected.severity}</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{selected.status}</span>
                     </div>
                   </div>
-
-                  {/* Action Buttons */}
-                  <div className="px-6 py-4 bg-white/50 flex gap-3">
-                    {selectedIncident.status === 'active' && (
-                      <button
-                        onClick={() => handleAssign(selectedIncident.id)}
-                        className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-colors shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
-                      >
-                        <Ambulance className="h-5 w-5" />
-                        Dispatch Unit
+                  <div className="flex gap-1">
+                    {selected.status === 'active' && (
+                      <button onClick={() => handleAssign(selected.id)} className="text-[10px] px-2 py-1 bg-rose-500/10 text-rose-400 rounded hover:bg-rose-500/20 transition-colors">
+                        <UserCheck className="h-3 w-3 inline mr-1" />Dispatch
                       </button>
                     )}
-                    {selectedIncident.status === 'assigned' && (
-                      <button
-                        onClick={() => handleResolve(selectedIncident.id)}
-                        className="flex-1 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors shadow-lg shadow-green-600/20 flex items-center justify-center gap-2"
-                      >
-                        <CheckCircle className="h-5 w-5" />
-                        Mark Resolved
-                      </button>
-                    )}
-                    <button className="py-3 px-6 bg-white hover:bg-slate-50 text-slate-700 rounded-xl font-medium transition-colors border border-slate-200 flex items-center gap-2">
-                      <Navigation className="h-4 w-4" />
-                      Navigate
+                    <button onClick={() => handleResolve(selected.id)} className="text-[10px] px-2 py-1 bg-green-500/10 text-green-400 rounded hover:bg-green-500/20 transition-colors">
+                      Resolve
                     </button>
-                    <a href="tel:112" className="py-3 px-6 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-medium transition-colors flex items-center gap-2">
-                      <Phone className="h-4 w-4" />
-                      Call
-                    </a>
                   </div>
                 </div>
 
-                {/* Details Grid */}
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Situation Report</h3>
-                    <p className="text-slate-700 leading-relaxed">{selectedIncident.description}</p>
-                  </div>
-                  
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Identified Hazards</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedIncident.risks.length > 0 ? selectedIncident.risks.map((risk, i) => (
-                        <span key={i} className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm font-medium">
-                          {risk}
-                        </span>
-                      )) : (
-                        <span className="text-slate-400 text-sm">No specific hazards identified</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                {selected.description && <p className="text-xs text-zinc-400">{selected.description}</p>}
 
-                {/* Tactical Advice */}
-                {selectedIncident.tacticalAdvice && (
-                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6">
-                    <div className="flex items-start gap-4">
-                      <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <Stethoscope className="h-5 w-5 text-white" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-blue-900 mb-2">Medical Protocol</h3>
-                        <p className="text-blue-800 leading-relaxed">{selectedIncident.tacticalAdvice}</p>
-                      </div>
-                    </div>
-                  </div>
+                {selected.location_address && (
+                  <p className="text-[11px] text-zinc-500 flex items-center gap-1"><MapPin className="h-3 w-3" />{selected.location_address}</p>
                 )}
 
-                {/* Steps */}
-                {selectedIncident.steps.length > 0 && (
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-4">Guided Response Steps</h3>
-                    <div className="space-y-3">
-                      {selectedIncident.steps.slice(0, 5).map((step, i) => (
-                        <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl">
-                          <div className="w-6 h-6 bg-slate-900 rounded-full flex items-center justify-center flex-shrink-0">
-                            <span className="text-xs text-white font-semibold">{i + 1}</span>
-                          </div>
-                          <p className="text-sm text-slate-700">{step}</p>
-                        </div>
+                {selected.risks?.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-zinc-500 mb-1">Medical Risks</p>
+                    <div className="flex flex-wrap gap-1">
+                      {selected.risks.map((r: string, i: number) => (
+                        <span key={i} className="text-[9px] px-1.5 py-0.5 bg-red-500/10 text-red-400 rounded">{r}</span>
                       ))}
                     </div>
                   </div>
                 )}
+
+                {selected.steps?.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-zinc-500 mb-1">Medical Protocol</p>
+                    <ol className="space-y-1">
+                      {selected.steps.map((s: string, i: number) => (
+                        <li key={i} className="text-[11px] text-zinc-400 flex items-start gap-2">
+                          <span className="w-4 h-4 rounded-full bg-zinc-800 flex items-center justify-center text-[8px] flex-shrink-0 mt-0.5">{i + 1}</span>
+                          {s}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {selected.created_at && (
+                  <p className="text-[10px] text-zinc-600 flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {new Date(selected.created_at).toLocaleString()}
+                  </p>
+                )}
               </div>
             ) : (
-              <div className="bg-white rounded-2xl border border-slate-200 p-12 flex flex-col items-center justify-center text-center shadow-sm">
-                <div className="w-20 h-20 bg-slate-100 rounded-2xl flex items-center justify-center mb-4">
-                  <Heart className="h-10 w-10 text-slate-400" />
-                </div>
-                <h3 className="text-lg font-semibold text-slate-900 mb-2">No Incident Selected</h3>
-                <p className="text-slate-500">Select an incident from the list to view details</p>
+              <div className="flex items-center justify-center h-full">
+                <p className="text-[11px] text-zinc-600">Select an incident</p>
               </div>
             )}
           </div>
         </div>
-      </main>
+      </div>
     </div>
   )
+}
+
+export default function MedicalDashboard() {
+  return <AuthGuard><MedicalContent /></AuthGuard>
 }
