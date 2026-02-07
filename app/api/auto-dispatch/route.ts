@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   const supabase = createServerClient()
 
   try {
-    const { sessionId, type, severity, lat, lng } = await req.json()
+    const { sessionId, type, severity, lat, lng, dispatchNotes } = await req.json()
 
     if (!sessionId || !lat || !lng) {
       return NextResponse.json({ error: 'sessionId, lat, lng required' }, { status: 400 })
@@ -96,10 +96,14 @@ export async function POST(req: NextRequest) {
         })
         .eq('id', sessionId)
 
-      // Also update the incidents table so department dashboards see assignment
+      // Also update the incidents table so department dashboards see assignment + dispatch notes
+      const incidentUpdate: any = { status: 'assigned' }
+      if (dispatchNotes) {
+        incidentUpdate.tactical_advice = dispatchNotes
+      }
       await supabase
         .from('incidents')
-        .update({ status: 'assigned' })
+        .update(incidentUpdate)
         .eq('reported_by', sessionId)
 
       // Create incident_assignments records

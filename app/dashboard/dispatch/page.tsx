@@ -6,8 +6,8 @@ import dynamic from 'next/dynamic'
 import {
   ArrowLeft, MapPin, Phone, Clock, Send, CheckCircle2,
   Heart, Flame, Car, Shield, AlertTriangle, Bell,
-  Radio, UserCheck, ChevronRight, MessageSquare,
-  FileText, Loader2, X, Volume2, Eye, Zap, Activity
+  Radio, UserCheck, ChevronRight, MessageSquare, Info,
+  FileText, Loader2, X, Volume2, Eye, Zap, Activity, Users
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth-guard'
 import { supabase } from '@/lib/supabase'
@@ -39,6 +39,127 @@ const typeColors: Record<string, string> = {
   safety: 'text-blue-400', other: 'text-zinc-400'
 }
 
+// --- Dispatch Modal ---
+function DispatchModal({ type, session, onClose, onDispatch }: {
+  type: 'medical' | 'police' | 'fire'
+  session: Session
+  onClose: () => void
+  onDispatch: (type: 'medical' | 'police' | 'fire', notes: string) => void
+}) {
+  const [notes, setNotes] = useState('')
+  const [sending, setSending] = useState(false)
+  const icons = { medical: Heart, police: Shield, fire: Flame }
+  const labels = { medical: 'EMS / Ambulance', police: 'Police Unit', fire: 'Fire Engine' }
+  const colors = { medical: 'border-pink-500/30 bg-pink-500/5', police: 'border-blue-500/30 bg-blue-500/5', fire: 'border-orange-500/30 bg-orange-500/5' }
+  const btnColors = { medical: 'bg-pink-600 hover:bg-pink-500', police: 'bg-blue-600 hover:bg-blue-500', fire: 'bg-orange-600 hover:bg-orange-500' }
+  const IconC = icons[type]
+
+  const handleSend = async () => {
+    setSending(true)
+    await onDispatch(type, notes.trim())
+    setSending(false)
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className={`p-4 border-b rounded-t-xl ${colors[type]}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <IconC className={`h-5 w-5 ${typeColors[type]}`} />
+              <h3 className="text-sm font-semibold">Dispatch {labels[type]}</h3>
+            </div>
+            <button onClick={onClose} className="p-1 hover:bg-zinc-800 rounded"><X className="h-4 w-4 text-zinc-500" /></button>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {/* Quick incident info */}
+          <div className="bg-zinc-800/50 rounded-lg p-3 space-y-1.5">
+            <p className="text-xs font-medium text-white">{session.summary || 'Emergency'}</p>
+            <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+              <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">{session.severity}</span>
+              <span>{session.type}</span>
+              {session.location?.address && (
+                <>
+                  <span>·</span>
+                  <MapPin className="h-2.5 w-2.5" />
+                  <span className="truncate">{session.location.address.split(',').slice(0, 2).join(',')}</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Notes textarea */}
+          <div>
+            <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1.5 block">
+              Dispatch Notes (sent to {type} dashboard)
+            </label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder={`e.g. "Victim is on 3rd floor, use east stairway. Caller reports smoke inhalation. Approach from Ring Road side."`}
+              rows={4}
+              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-lg text-xs focus:outline-none focus:border-zinc-500 placeholder:text-zinc-700 resize-none transition-colors"
+              autoFocus
+            />
+            <p className="text-[9px] text-zinc-600 mt-1">These notes will appear on the {type} department dashboard for this incident.</p>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 pt-1">
+            <button onClick={onClose} className="flex-1 py-2 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors text-zinc-400">Cancel</button>
+            <button onClick={handleSend} disabled={sending} className={`flex-1 py-2 text-xs text-white rounded-lg transition-colors flex items-center justify-center gap-1.5 ${btnColors[type]} ${sending ? 'opacity-50' : ''}`}>
+              {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+              {sending ? 'Dispatching...' : `Dispatch ${type === 'medical' ? 'EMS' : type === 'police' ? 'Police' : 'Fire'}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Quick Summary Card ---
+function QuickSummary({ session }: { session: Session }) {
+  const callerMsgs = session.messages?.filter((m: any) => m.role === 'user') || []
+  const aiMsgs = session.messages?.filter((m: any) => m.role === 'ai') || []
+  const stepsCount = session.steps?.length || 0
+  const completedSteps = session.steps?.filter((s: any) => s.completed)?.length || 0
+
+  // Build a quick text summary from caller messages
+  const callerSummary = callerMsgs.slice(0, 3).map((m: any) => m.content).join(' ').slice(0, 200)
+
+  return (
+    <div className="mx-4 mt-2 p-3 bg-zinc-900/60 border border-zinc-800/50 rounded-lg flex-shrink-0">
+      <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">
+        <Info className="h-3 w-3" /> Quick Summary
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-2">
+        <div className="bg-zinc-800/40 rounded p-2">
+          <p className="text-[9px] text-zinc-600">Type</p>
+          <p className="text-[11px] text-white font-medium capitalize">{session.type}</p>
+        </div>
+        <div className="bg-zinc-800/40 rounded p-2">
+          <p className="text-[9px] text-zinc-600">Messages</p>
+          <p className="text-[11px] text-white font-medium">{callerMsgs.length} caller / {aiMsgs.length} AI</p>
+        </div>
+        <div className="bg-zinc-800/40 rounded p-2">
+          <p className="text-[9px] text-zinc-600">Steps</p>
+          <p className="text-[11px] text-white font-medium">{completedSteps}/{stepsCount} done</p>
+        </div>
+      </div>
+      {callerSummary && (
+        <div className="bg-zinc-800/30 rounded p-2">
+          <p className="text-[9px] text-zinc-600 mb-0.5">Caller said</p>
+          <p className="text-[10px] text-zinc-400 leading-relaxed line-clamp-2">&ldquo;{callerSummary}{callerSummary.length >= 200 ? '...' : ''}&rdquo;</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DispatchContent() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [selected, setSelected] = useState<Session | null>(null)
@@ -48,7 +169,7 @@ function DispatchContent() {
   const [qaReport, setQaReport] = useState<any>(null)
   const [showQA, setShowQA] = useState(false)
   const [responders, setResponders] = useState<any[]>([])
-  const [dispatching, setDispatching] = useState<string | null>(null)
+  const [dispatchModal, setDispatchModal] = useState<'medical' | 'police' | 'fire' | null>(null)
   const msgEndRef = useRef<HTMLDivElement>(null)
 
   // Fetch sessions
@@ -98,10 +219,9 @@ function DispatchContent() {
     fetchSessions()
   }
 
-  // Dispatch responder
-  const assignResponder = async (type: 'medical' | 'police' | 'fire') => {
+  // Dispatch responder WITH notes
+  const assignResponder = async (type: 'medical' | 'police' | 'fire', notes: string) => {
     if (!selected) return
-    setDispatching(type)
     const loc = selected.location
 
     if (loc?.lat && loc?.lng) {
@@ -110,20 +230,18 @@ function DispatchContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: selected.id, type, severity: selected.severity,
-          lat: loc.lat, lng: loc.lng,
+          lat: loc.lat, lng: loc.lng, dispatchNotes: notes,
         }),
       })
       const data = await res.json()
-      if (data.dispatched?.length) {
-        await fetch('/api/escalation', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: selected.id,
-            message: `${data.dispatched[0].name} (${data.dispatched[0].unit}) dispatched — ETA ${data.dispatched[0].eta} min`,
-          }),
-        })
-      }
+      const dispatchMsg = data.dispatched?.length
+        ? `${data.dispatched[0].name} (${data.dispatched[0].unit}) dispatched — ETA ${data.dispatched[0].eta} min${notes ? '\nNotes: ' + notes : ''}`
+        : `${type.toUpperCase()} dispatched${notes ? '\nNotes: ' + notes : ''}`
+      await fetch('/api/escalation', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: selected.id, message: dispatchMsg }),
+      })
     } else {
       const units: Record<string, any> = {
         medical: { name: 'Ambulance Unit 3', unit: 'EMS-3' },
@@ -136,11 +254,17 @@ function DispatchContent() {
         body: JSON.stringify({
           sessionId: selected.id, status: 'assigned',
           assignedResponder: { id: type, name: units[type].name, role: type, unit: units[type].unit },
-          message: `${units[type].name} dispatched`,
+          message: `${units[type].name} dispatched${notes ? '\nNotes: ' + notes : ''}`,
         }),
       })
+
+      // Store notes on incident for the department dashboard
+      if (notes) {
+        await supabase.from('incidents')
+          .update({ tactical_advice: notes })
+          .eq('reported_by', selected.id)
+      }
     }
-    setDispatching(null)
     fetchSessions()
     fetchResponders()
   }
@@ -153,9 +277,7 @@ function DispatchContent() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: selected.id, status: 'resolved', message: 'Session resolved by dispatch' }),
     })
-    // Also resolve the incident
     await supabase.from('incidents').update({ status: 'resolved' }).eq('reported_by', selected.id)
-    // Free up responders
     if (selected.assignedResponder?.id) {
       await supabase.from('responders').update({ status: 'available', current_incident_id: null }).eq('id', selected.assignedResponder.id)
     }
@@ -211,6 +333,16 @@ function DispatchContent() {
 
   return (
     <div className="h-screen bg-zinc-950 text-white flex flex-col">
+      {/* Dispatch Modal */}
+      {dispatchModal && selected && (
+        <DispatchModal
+          type={dispatchModal}
+          session={selected}
+          onClose={() => setDispatchModal(null)}
+          onDispatch={assignResponder}
+        />
+      )}
+
       {/* Header */}
       <header className="h-12 border-b border-zinc-800/50 flex items-center justify-between px-4 flex-shrink-0 bg-zinc-950/80 backdrop-blur-sm">
         <div className="flex items-center gap-3">
@@ -330,9 +462,9 @@ function DispatchContent() {
                     const colors = { medical: 'hover:bg-pink-500/10 hover:border-pink-500/30', police: 'hover:bg-blue-500/10 hover:border-blue-500/30', fire: 'hover:bg-orange-500/10 hover:border-orange-500/30' }
                     const IconC = icons[type]
                     return (
-                      <button key={type} onClick={() => assignResponder(type)} disabled={dispatching === type}
-                        className={`px-2 py-1.5 text-[11px] bg-zinc-900 border border-zinc-800 rounded-lg transition-all flex items-center gap-1 ${colors[type]} ${dispatching === type ? 'opacity-50' : ''}`}>
-                        {dispatching === type ? <Loader2 className="h-3 w-3 animate-spin" /> : <IconC className={`h-3 w-3 ${typeColors[type] || ''}`} />}
+                      <button key={type} onClick={() => setDispatchModal(type)}
+                        className={`px-2 py-1.5 text-[11px] bg-zinc-900 border border-zinc-800 rounded-lg transition-all flex items-center gap-1 ${colors[type]}`}>
+                        <IconC className={`h-3 w-3 ${typeColors[type] || ''}`} />
                         {labels[type]}
                       </button>
                     )
@@ -351,6 +483,9 @@ function DispatchContent() {
                   )}
                 </div>
               </div>
+
+              {/* Quick Summary */}
+              <QuickSummary session={selected} />
 
               {/* Assigned Responder Banner */}
               {selected.assignedResponder && (
@@ -385,7 +520,6 @@ function DispatchContent() {
                       const isSystem = m.role === 'system'
                       const isUser = m.role === 'user'
                       const isDispatch = m.role === 'dispatch'
-                      const isAI = m.role === 'ai'
 
                       if (isSystem) {
                         return (
@@ -409,7 +543,7 @@ function DispatchContent() {
                             }`}>
                               {isUser ? 'Caller' : isDispatch ? 'You (Dispatch)' : 'AI Assistant'}
                             </p>
-                            <p className="text-xs text-zinc-200 leading-relaxed">{m.content}</p>
+                            <p className="text-xs text-zinc-200 leading-relaxed whitespace-pre-line">{m.content}</p>
                             <p className="text-[9px] text-zinc-600 mt-1">{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                           </div>
                         </div>

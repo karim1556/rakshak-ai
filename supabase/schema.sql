@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS incidents (
   risks TEXT[] DEFAULT '{}',
   steps TEXT[] DEFAULT '{}',
   tactical_advice TEXT DEFAULT '',
+  dispatch_notes TEXT DEFAULT '',
   severity TEXT NOT NULL CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')),
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'assigned', 'en_route', 'on_scene', 'resolved')),
   location_lat DECIMAL(10, 8),
@@ -67,6 +68,7 @@ CREATE TABLE IF NOT EXISTS escalated_sessions (
   escalated_at TIMESTAMPTZ DEFAULT NOW(),
   resolved_at TIMESTAMPTZ,
   qa_report JSONB,
+  dispatch_notes TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

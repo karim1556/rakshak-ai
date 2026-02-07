@@ -158,6 +158,16 @@ function PoliceContent() {
 
                 {selected.description && <p className="text-xs text-zinc-400">{selected.description}</p>}
 
+                {/* Dispatch Notes */}
+                {selected.tactical_advice && (
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
+                    <p className="text-[10px] text-amber-400 font-medium mb-1 flex items-center gap-1.5 uppercase tracking-wider">
+                      <AlertTriangle className="h-3 w-3" /> Dispatch Notes
+                    </p>
+                    <p className="text-xs text-amber-200/80 leading-relaxed whitespace-pre-line">{selected.tactical_advice}</p>
+                  </div>
+                )}
+
                 {selected.location_address && (
                   <p className="text-[11px] text-zinc-500 flex items-center gap-1"><MapPin className="h-3 w-3" />{selected.location_address}</p>
                 )}
