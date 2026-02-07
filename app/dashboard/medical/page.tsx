@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { ArrowLeft, Heart, AlertTriangle, MapPin, Loader2, UserCheck, Clock, Activity } from 'lucide-react'
+import { ArrowLeft, Heart, AlertTriangle, MapPin, Loader2, UserCheck, Clock, Activity, Navigation, X, Radio, RotateCcw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth-guard'
 import { supabase } from '@/lib/supabase'
 
@@ -14,6 +14,7 @@ function MedicalContent() {
   const [responders, setResponders] = useState<any[]>([])
   const [selected, setSelected] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [assignModal, setAssignModal] = useState<string | null>(null)
 
   const load = async () => {
     const [{ data: inc }, { data: resp }] = await Promise.all([
@@ -45,34 +46,128 @@ function MedicalContent() {
   const markers = [
     ...incidents.filter(i => i.location_lat && i.location_lng).map(i => ({
       position: [Number(i.location_lat), Number(i.location_lng)] as [number, number],
-      popup: `<b>📍 ${i.summary || 'Medical Emergency'}</b><br/><em style="color:#6366f1">Live Location</em>`,
+      popup: `<b>📍 ${i.summary || 'Medical Emergency'}</b><br/><span style="color:#dc2626;font-weight:600">${i.severity}</span> · ${i.type}<br/><em style="color:#6366f1">Live Location</em>`,
       type: 'user-live' as const
     })),
     ...responders.filter(r => r.location_lat && r.location_lng).map(r => ({
       position: [Number(r.location_lat), Number(r.location_lng)] as [number, number],
-      popup: `<b>${r.name}</b>`,
+      popup: `<b>${r.name}</b><br/>${r.unit_id} · <span style="color:${r.status === 'available' ? '#16a34a' : '#dc2626'}">${r.status}</span>`,
       type: 'responder' as const
     }))
   ]
 
-  const handleAssign = async (id: string) => {
-    const freeUnit = responders.find(r => r.status === 'available')
-    if (!freeUnit) return
+  // Build routes: lines from busy responders to their assigned incidents
+  const routes = responders
+    .filter(r => r.status === 'busy' && r.location_lat && r.location_lng && r.current_incident_id)
+    .map(r => {
+      const inc = incidents.find(i => i.id === r.current_incident_id)
+      if (!inc || !inc.location_lat || !inc.location_lng) return null
+      return {
+        from: [Number(r.location_lat), Number(r.location_lng)] as [number, number],
+        to: [Number(inc.location_lat), Number(inc.location_lng)] as [number, number],
+        color: '#e11d48',
+        label: `${r.name} → ${inc.summary?.split(' ').slice(0, 3).join(' ') || 'Incident'}`,
+      }
+    }).filter(Boolean) as { from: [number, number]; to: [number, number]; color: string; label: string }[]
+
+  const selectedPosition: [number, number] | null = selected?.location_lat && selected?.location_lng
+    ? [Number(selected.location_lat), Number(selected.location_lng)]
+    : null
+
+  const handleAssign = async (incidentId: string, responderId: string) => {
+    const inc = incidents.find(i => i.id === incidentId)
+    const locUpdate: any = { status: 'busy', current_incident_id: incidentId }
+    if (inc?.location_lat && inc?.location_lng) {
+      const offsetLat = (Math.random() * 0.01 + 0.005) * (Math.random() > 0.5 ? 1 : -1)
+      const offsetLng = (Math.random() * 0.01 + 0.005) * (Math.random() > 0.5 ? 1 : -1)
+      locUpdate.location_lat = Number(inc.location_lat) + offsetLat
+      locUpdate.location_lng = Number(inc.location_lng) + offsetLng
+    }
     await Promise.all([
-      supabase.from('incidents').update({ status: 'assigned' }).eq('id', id),
-      supabase.from('responders').update({ status: 'busy' }).eq('id', freeUnit.id),
+      (supabase.from('incidents') as any).update({ status: 'assigned' }).eq('id', incidentId),
+      (supabase.from('responders') as any).update(locUpdate).eq('id', responderId),
     ])
+    setAssignModal(null)
+    load()
+  }
+
+  const resetUnits = async () => {
+    await (supabase.from('responders') as any)
+      .update({ status: 'available', current_incident_id: null })
+      .in('role', ['medical', 'rescue'])
     load()
   }
 
   const handleResolve = async (id: string) => {
-    await supabase.from('incidents').update({ status: 'resolved' }).eq('id', id)
+    await (supabase.from('incidents') as any).update({ status: 'resolved' }).eq('id', id)
+    // Free up any assigned responders
+    await (supabase.from('responders') as any).update({ status: 'available', current_incident_id: null }).eq('current_incident_id', id)
     setSelected(null)
     load()
   }
 
+  const availableResponders = responders.filter(r => r.status === 'available')
+  const busyResponders = responders.filter(r => r.status === 'busy')
+
   return (
     <div className="h-screen bg-gradient-to-br from-slate-50 via-white to-rose-50/30 text-slate-900 flex flex-col">
+      {/* Assign Modal */}
+      {assignModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setAssignModal(null)}>
+          <div className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-rose-100 bg-rose-50 rounded-t-2xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="h-4 w-4 text-rose-500" />
+                  <h3 className="text-sm font-bold text-slate-800">Assign Responder</h3>
+                </div>
+                <button onClick={() => setAssignModal(null)} className="p-1 hover:bg-white/50 rounded-lg"><X className="h-4 w-4 text-slate-500" /></button>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">Select a unit to dispatch to this incident</p>
+            </div>
+            <div className="p-3 max-h-64 overflow-y-auto space-y-1.5">
+              {availableResponders.length === 0 ? (
+                <div className="text-center py-6">
+                  <Radio className="h-6 w-6 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs text-slate-400 font-medium">No units available</p>
+                  <p className="text-[10px] text-slate-300">All units are currently assigned</p>
+                </div>
+              ) : availableResponders.map(r => (
+                <button
+                  key={r.id}
+                  onClick={() => handleAssign(assignModal, r.id)}
+                  className="w-full p-3 bg-white border border-slate-200 rounded-xl hover:border-rose-300 hover:bg-rose-50/50 transition-all flex items-center gap-3 group"
+                >
+                  <div className="w-9 h-9 bg-rose-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Heart className="h-4 w-4 text-rose-500" />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className="text-xs font-semibold text-slate-800">{r.name}</p>
+                    <p className="text-[10px] text-slate-400">{r.unit_id} · <span className="text-emerald-500 font-medium">Available</span></p>
+                  </div>
+                  <UserCheck className="h-4 w-4 text-slate-300 group-hover:text-rose-500 transition-colors" />
+                </button>
+              ))}
+              {busyResponders.length > 0 && (
+                <>
+                  <p className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold pt-2 px-1">Currently Assigned</p>
+                  {busyResponders.map(r => (
+                    <div key={r.id} className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl flex items-center gap-3 opacity-60">
+                      <div className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Heart className="h-4 w-4 text-slate-400" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-xs font-semibold text-slate-500">{r.name}</p>
+                        <p className="text-[10px] text-slate-400">{r.unit_id} · <span className="text-red-400 font-medium">Busy</span></p>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       <header className="h-14 border-b border-slate-200/60 flex items-center justify-between px-5 flex-shrink-0 bg-white/70 backdrop-blur-sm">
         <div className="flex items-center gap-3">
           <Link href="/" className="p-1.5 hover:bg-slate-100 rounded-lg"><ArrowLeft className="h-4 w-4 text-slate-500" /></Link>
@@ -81,10 +176,15 @@ function MedicalContent() {
           </div>
           <span className="text-sm font-bold">Medical Command</span>
         </div>
-        <div className="flex gap-4 text-xs text-slate-500">
+        <div className="flex items-center gap-3 text-xs text-slate-500">
           <span className="font-medium">{active} active</span>
           {critical > 0 && <span className="text-red-500 font-medium">{critical} critical</span>}
           <span className="text-emerald-600 font-medium">{available}/{responders.length} units ready</span>
+          {busyResponders.length > 0 && (
+            <button onClick={resetUnits} className="flex items-center gap-1 text-[10px] px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-500 font-medium">
+              <RotateCcw className="h-3 w-3" /> Reset Units
+            </button>
+          )}
         </div>
       </header>
 
@@ -137,8 +237,16 @@ function MedicalContent() {
         </div>
 
         <div className="flex-1 flex flex-col">
-          <div className="h-56 border-b border-slate-200/60">
-            <MapComponent markers={markers} zoom={12} light={true} />
+          <div className="h-72 border-b border-slate-200/60 relative">
+            <MapComponent markers={markers} routes={routes} zoom={12} light={true} selectedIncident={selectedPosition} />
+            {routes.length > 0 && (
+              <div className="absolute top-2 right-2 z-[1000] bg-white/90 backdrop-blur-sm border border-rose-200 rounded-lg px-2.5 py-1.5 shadow-sm">
+                <div className="flex items-center gap-1.5 text-[9px] text-rose-600 font-semibold">
+                  <Navigation className="h-3 w-3" />
+                  {routes.length} unit{routes.length > 1 ? 's' : ''} en route
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 bg-slate-50/50">
@@ -154,8 +262,8 @@ function MedicalContent() {
                   </div>
                   <div className="flex gap-1.5">
                     {selected.status === 'active' && (
-                      <button onClick={() => handleAssign(selected.id)} className="text-[10px] px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors font-semibold border border-rose-200 shadow-sm">
-                        <UserCheck className="h-3 w-3 inline mr-1" />Dispatch
+                      <button onClick={() => setAssignModal(selected.id)} className="text-[10px] px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors font-semibold border border-rose-200 shadow-sm">
+                        <UserCheck className="h-3 w-3 inline mr-1" />Assign
                       </button>
                     )}
                     <button onClick={() => handleResolve(selected.id)} className="text-[10px] px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors font-semibold border border-emerald-200 shadow-sm">

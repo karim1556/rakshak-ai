@@ -340,9 +340,29 @@ function DispatchContent() {
       }
     })
     responders.filter(r => r.location_lat && r.location_lng).forEach(r => {
-      m.push({ position: [Number(r.location_lat), Number(r.location_lng)] as [number, number], popup: `<b>${r.name}</b><br/>${r.unit_id} • ${r.status}`, type: 'responder' as const })
+      m.push({ position: [Number(r.location_lat), Number(r.location_lng)] as [number, number], popup: `<b>${r.name}</b><br/>${r.unit_id} • <span style="color:${r.status === 'available' ? '#16a34a' : '#dc2626'}">${r.status}</span>`, type: 'responder' as const })
     })
     return m
+  }, [sessions, responders])
+
+  // Build routes: lines from assigned/busy responders to their session locations
+  const mapRoutes = useMemo(() => {
+    const lines: { from: [number, number]; to: [number, number]; color: string; label: string }[] = []
+    sessions.forEach(s => {
+      if (!s.location?.lat || !s.location?.lng || !s.assignedResponder) return
+      // Find the responder with location in the DB
+      const resp = responders.find(r => r.id === s.assignedResponder?.id || r.name === s.assignedResponder?.name)
+      if (resp?.location_lat && resp?.location_lng) {
+        const typeColors: Record<string, string> = { medical: '#e11d48', fire: '#ea580c', police: '#2563eb', rescue: '#7c3aed' }
+        lines.push({
+          from: [Number(resp.location_lat), Number(resp.location_lng)],
+          to: [s.location.lat, s.location.lng],
+          color: typeColors[resp.role] || '#6366f1',
+          label: `${resp.name} → ${s.summary?.split(' ').slice(0, 2).join(' ') || 'Emergency'}`,
+        })
+      }
+    })
+    return lines
   }, [sessions, responders])
 
   const criticalCount = sessions.filter(s => s.severity === 'CRITICAL').length
@@ -601,13 +621,23 @@ function DispatchContent() {
                 <div className="flex-1 flex flex-col border-r border-slate-200/60">
                   {/* Map */}
                   {(selected.location?.lat || mapMarkers.length > 0) && (
-                    <div className="h-48 border-b border-slate-200/60 flex-shrink-0">
+                    <div className="h-52 border-b border-slate-200/60 flex-shrink-0 relative">
                       <MapComponent
                         center={selected.location?.lat && selected.location?.lng ? [selected.location.lat, selected.location.lng] : undefined}
                         zoom={14}
                         markers={mapMarkers}
+                        routes={mapRoutes}
                         light={true}
+                        selectedIncident={selected.location?.lat && selected.location?.lng ? [selected.location.lat, selected.location.lng] : null}
                       />
+                      {mapRoutes.length > 0 && (
+                        <div className="absolute top-2 right-2 z-[1000] bg-white/90 backdrop-blur-sm border border-indigo-200 rounded-lg px-2.5 py-1.5 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[9px] text-indigo-600 font-semibold">
+                            <Activity className="h-3 w-3" />
+                            {mapRoutes.length} unit{mapRoutes.length > 1 ? 's' : ''} en route
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
