@@ -356,6 +356,63 @@ export interface Database {
         }
         Relationships: []
       }
+      health_profiles: {
+        Row: {
+          id: string
+          citizen_identifier: string
+          full_name: string
+          date_of_birth: string | null
+          blood_type: string | null
+          allergies: string[]
+          medications: string[]
+          conditions: string[]
+          emergency_notes: string
+          organ_donor: boolean
+          height_cm: number | null
+          weight_kg: number | null
+          primary_physician: string | null
+          physician_phone: string | null
+          insurance_info: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          citizen_identifier: string
+          full_name?: string
+          date_of_birth?: string | null
+          blood_type?: string | null
+          allergies?: string[]
+          medications?: string[]
+          conditions?: string[]
+          emergency_notes?: string
+          organ_donor?: boolean
+          height_cm?: number | null
+          weight_kg?: number | null
+          primary_physician?: string | null
+          physician_phone?: string | null
+          insurance_info?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          full_name?: string
+          date_of_birth?: string | null
+          blood_type?: string | null
+          allergies?: string[]
+          medications?: string[]
+          conditions?: string[]
+          emergency_notes?: string
+          organ_donor?: boolean
+          height_cm?: number | null
+          weight_kg?: number | null
+          primary_physician?: string | null
+          physician_phone?: string | null
+          insurance_info?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

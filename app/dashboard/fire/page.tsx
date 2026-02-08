@@ -3,10 +3,11 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { ArrowLeft, Flame, AlertTriangle, MapPin, Loader2, UserCheck, Clock, Navigation, X, Radio, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Flame, AlertTriangle, MapPin, Loader2, UserCheck, Clock, Navigation, X, Radio, RotateCcw, Route } from 'lucide-react'
 import { AuthGuard } from '@/components/auth-guard'
 import { supabase } from '@/lib/supabase'
 import { haversineDistance, formatDistance, estimateETA } from '@/lib/utils'
+import { ResponderNavigation } from '@/components/responder-navigation'
 
 const MapComponent = dynamic(() => import('@/components/map').then(m => ({ default: m.Map })), { ssr: false })
 
@@ -16,6 +17,7 @@ function FireContent() {
   const [selected, setSelected] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [assignModal, setAssignModal] = useState<string | null>(null)
+  const [showNavigation, setShowNavigation] = useState(false)
 
   const load = async () => {
     const [{ data: resp }] = await Promise.all([
@@ -309,6 +311,11 @@ function FireContent() {
                     </div>
                   </div>
                   <div className="flex gap-1.5">
+                    {selected.location_lat && selected.location_lng && (
+                      <button onClick={() => setShowNavigation(!showNavigation)} className={`text-[10px] px-3 py-1.5 rounded-lg transition-colors font-semibold border shadow-sm ${showNavigation ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100'}`}>
+                        <Route className="h-3 w-3 inline mr-1" />Navigate
+                      </button>
+                    )}
                     {(selected.status === 'active' || selected.status === 'assigned') && (
                       <button onClick={() => setAssignModal(selected.id)} className="text-[10px] px-3 py-1.5 bg-orange-50 text-orange-600 rounded-lg hover:bg-orange-100 transition-colors font-semibold border border-orange-200 shadow-sm">
                         <UserCheck className="h-3 w-3 inline mr-1" />Assign
@@ -338,6 +345,17 @@ function FireContent() {
                     <span className="ml-auto text-[9px] text-indigo-400 font-semibold">LIVE</span>
                     <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse" />
                   </div>
+                )}
+
+                {showNavigation && selected.location_lat && selected.location_lng && (
+                  <ResponderNavigation
+                    incidentLocation={{
+                      lat: Number(selected.location_lat),
+                      lng: Number(selected.location_lng),
+                      address: selected.location_address || undefined,
+                    }}
+                    onClose={() => setShowNavigation(false)}
+                  />
                 )}
 
                 {selected.risks?.length > 0 && (

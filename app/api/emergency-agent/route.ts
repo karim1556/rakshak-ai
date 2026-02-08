@@ -27,7 +27,7 @@ interface AIResponse {
 
 export async function POST(req: NextRequest) {
   try {
-    const { sessionId, message, conversationHistory = [], currentSteps = [], imageBase64 } = await req.json()
+    const { sessionId, message, conversationHistory = [], currentSteps = [], imageBase64, language = 'en' } = await req.json()
 
     if (!message && !imageBase64) {
       return NextResponse.json({ error: 'Message or image is required' }, { status: 400 })
@@ -49,7 +49,31 @@ export async function POST(req: NextRequest) {
       .map((s: any, i: number) => `${i + 1}. ${s.text} ${s.completed ? '(DONE)' : ''}`)
       .join('\n')
 
+    const LANGUAGE_NAMES: Record<string, string> = {
+      en: 'English', hi: 'Hindi', mr: 'Marathi', ta: 'Tamil', te: 'Telugu',
+      kn: 'Kannada', ml: 'Malayalam', gu: 'Gujarati', bn: 'Bengali',
+      pa: 'Punjabi', ur: 'Urdu', es: 'Spanish', fr: 'French', de: 'German',
+      ja: 'Japanese', ko: 'Korean', zh: 'Chinese', ar: 'Arabic',
+      pt: 'Portuguese', ru: 'Russian', multi: 'Auto-detect',
+    }
+
+    const langName = LANGUAGE_NAMES[language] || 'English'
+    const isNonEnglish = language !== 'en' && language !== 'multi'
+
     const systemPrompt = `You are Rakshak, an AI emergency assistant having a voice conversation. Be a calm, knowledgeable friend who guides people through tough situations.
+
+${isNonEnglish ? `CRITICAL LANGUAGE INSTRUCTION:
+You MUST respond entirely in ${langName}. The user is speaking ${langName}. 
+- Your "response" field must be in ${langName}
+- Your "steps" text must be in ${langName}
+- Your "summary" can remain in English for dispatch systems
+- Use natural, colloquial ${langName} — not formal/textbook language
+- If the user code-switches (mixes English), respond in ${langName} with occasional English terms they used
+` : language === 'multi' ? `LANGUAGE INSTRUCTION:
+Detect the language the user is speaking and respond in that SAME language.
+If the user speaks Hindi, respond in Hindi. If Marathi, respond in Marathi. And so on.
+Your "response" and "steps" should match the user's language.
+` : ''}
 
 ${imageBase64 ? `IMPORTANT - VIDEO/IMAGE ANALYSIS:
 You have been given a live camera image from the scene. Analyze it carefully to:

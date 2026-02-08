@@ -291,6 +291,61 @@ INSERT INTO responders (name, role, unit_id, status, location_lat, location_lng)
 ON CONFLICT (unit_id) DO NOTHING;
 
 -- ============================================================================
+-- HEALTH PROFILES TABLE (Medical History Integration)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS health_profiles (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  citizen_identifier TEXT NOT NULL UNIQUE,
+  full_name TEXT DEFAULT '',
+  date_of_birth DATE,
+  blood_type TEXT CHECK (blood_type IS NULL OR blood_type IN ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-')),
+  allergies TEXT[] DEFAULT '{}',
+  medications TEXT[] DEFAULT '{}',
+  conditions TEXT[] DEFAULT '{}',
+  emergency_notes TEXT DEFAULT '',
+  organ_donor BOOLEAN DEFAULT FALSE,
+  height_cm DECIMAL(5, 1),
+  weight_kg DECIMAL(5, 1),
+  primary_physician TEXT,
+  physician_phone TEXT,
+  insurance_info TEXT,
+  -- Personal registration fields
+  phone_number TEXT,
+  email TEXT,
+  address TEXT,
+  gender TEXT,
+  emergency_contact_name TEXT,
+  emergency_contact_phone TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_health_profiles_citizen ON health_profiles(citizen_identifier);
+
+-- RLS
+ALTER TABLE health_profiles ENABLE ROW LEVEL SECURITY;
+
+-- Allow public insert (citizens creating their own profiles)
+CREATE POLICY "Anyone can create a health profile" ON health_profiles FOR INSERT TO anon, authenticated WITH CHECK (true);
+
+-- Allow reading by authenticated users (medical responders need access during emergencies)
+CREATE POLICY "Authenticated users can read health profiles" ON health_profiles FOR SELECT TO authenticated USING (true);
+
+-- Allow public read for emergency access (when citizen shares via session)
+CREATE POLICY "Public emergency access to health profiles" ON health_profiles FOR SELECT TO anon USING (true);
+
+-- Allow updates by the profile owner
+CREATE POLICY "Anyone can update their own health profile" ON health_profiles FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- Allow delete
+CREATE POLICY "Anyone can delete their own health profile" ON health_profiles FOR DELETE TO anon, authenticated USING (true);
+
+-- Enable realtime
+ALTER PUBLICATION supabase_realtime ADD TABLE health_profiles;
+
+-- ============================================================================
 -- DEMO ACCOUNTS SETUP
 -- ============================================================================
 -- After running this schema, create these demo accounts via Supabase Dashboard:

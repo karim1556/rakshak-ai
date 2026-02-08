@@ -6,7 +6,7 @@ import {
   Mic, MicOff, X, Phone, PhoneOff, PhoneCall, Volume2, VolumeX, Loader2, 
   CheckCircle2, Circle, Shield, AlertTriangle, Heart,
   Flame, Car, Users, ChevronRight, Video, VideoOff, Camera,
-  MapPin, AlertOctagon, Radio
+  MapPin, AlertOctagon, Radio, Globe
 } from 'lucide-react'
 import { useEmergencyStore } from '@/lib/emergency-store'
 import { supabase } from '@/lib/supabase'
@@ -20,6 +20,36 @@ const typeIcons: Record<string, any> = {
   accident: Car,
   safety: Shield,
   other: AlertTriangle,
+}
+
+const LANGUAGES = [
+  { code: 'en', name: 'English', flag: '🇬🇧' },
+  { code: 'hi', name: 'हिन्दी', flag: '🇮🇳' },
+  { code: 'mr', name: 'मराठी', flag: '🇮🇳' },
+  { code: 'ta', name: 'தமிழ்', flag: '🇮🇳' },
+  { code: 'te', name: 'తెలుగు', flag: '🇮🇳' },
+  { code: 'kn', name: 'ಕನ್ನಡ', flag: '🇮🇳' },
+  { code: 'bn', name: 'বাংলা', flag: '🇮🇳' },
+  { code: 'gu', name: 'ગુજરાતી', flag: '🇮🇳' },
+  { code: 'pa', name: 'ਪੰਜਾਬੀ', flag: '🇮🇳' },
+  { code: 'ml', name: 'മലയാളം', flag: '🇮🇳' },
+  { code: 'ur', name: 'اردو', flag: '🇵🇰' },
+  { code: 'multi', name: 'Auto-detect', flag: '🌐' },
+]
+
+const LANGUAGE_GREETINGS: Record<string, string> = {
+  en: "Hey, I'm Rakshak. Tell me what's happening - I'm here to help you through this.",
+  hi: "नमस्ते, मैं रक्षक हूँ। मुझे बताइए क्या हो रहा है — मैं आपकी मदद के लिए यहाँ हूँ।",
+  mr: "नमस्कार, मी रक्षक आहे. मला सांगा काय होत आहे — मी तुम्हाला मदत करण्यासाठी इथे आहे.",
+  ta: "வணக்கம், நான் ரக்ஷக். என்ன நடக்கிறது என்று சொல்லுங்கள் — நான் உங்களுக்கு உதவ இங்கே இருக்கிறேன்.",
+  te: "నమస్కారం, నేను రక్షక్. ఏమి జరుగుతుందో చెప్పండి — నేను మీకు సహాయం చేయడానికి ఇక్కడ ఉన్నాను.",
+  kn: "ನಮಸ್ಕಾರ, ನಾನು ರಕ್ಷಕ್. ಏನಾಗುತ್ತಿದೆ ಎಂದು ಹೇಳಿ — ನಾನು ನಿಮಗೆ ಸಹಾಯ ಮಾಡಲು ಇಲ್ಲಿದ್ದೇನೆ.",
+  bn: "নমস্কার, আমি রক্ষক। কী হচ্ছে বলুন — আমি আপনাকে সাহায্য করতে এখানে আছি।",
+  gu: "નમસ્તે, હું રક્ષક છું. શું થઈ રહ્યું છે તે મને કહો — હું તમારી મદદ માટે અહીં છું.",
+  pa: "ਸਤ ਸ੍ਰੀ ਅਕਾਲ, ਮੈਂ ਰਕਸ਼ਕ ਹਾਂ। ਮੈਨੂੰ ਦੱਸੋ ਕੀ ਹੋ ਰਿਹਾ ਹੈ — ਮੈਂ ਤੁਹਾਡੀ ਮਦਦ ਲਈ ਇੱਥੇ ਹਾਂ।",
+  ml: "നമസ്കാരം, ഞാൻ രക്ഷക് ആണ്. എന്താണ് സംഭവിക്കുന്നതെന്ന് പറയൂ — ഞാൻ നിങ്ങളെ സഹായിക്കാൻ ഇവിടെയുണ്ട്.",
+  ur: "نمسکار، میں رکشک ہوں۔ مجھے بتائیں کیا ہو رہا ہے — میں آپ کی مدد کے لیے یہاں ہوں۔",
+  multi: "Hey, I'm Rakshak. Tell me what's happening - I'm here to help you through this.",
 }
 
 export default function EmergencyPage() {
@@ -57,6 +87,11 @@ export default function EmergencyPage() {
   // Geolocation
   const [geoStatus, setGeoStatus] = useState<'pending' | 'ok' | 'denied'>('pending')
   const locationRef = useRef<{ lat: number; lng: number; address?: string } | null>(null)
+
+  // Language
+  const [selectedLanguage, setSelectedLanguage] = useState('en')
+  const [showLanguagePicker, setShowLanguagePicker] = useState(false)
+  const languageRef = useRef('en')
 
   // SOS state
   const [sosCountdown, setSosCountdown] = useState<number | null>(null)
@@ -401,25 +436,25 @@ export default function EmergencyPage() {
       initializedRef.current = true
       
       if (!useEmergencyStore.getState().session) {
-        startSession()
+        startSession(selectedLanguage)
       }
       
       setTimeout(() => {
-        const greeting = "Hey, I'm Rakshak. Tell me what's happening - I'm here to help you through this."
+        const greeting = LANGUAGE_GREETINGS[languageRef.current] || LANGUAGE_GREETINGS['en']
         addMessage('ai', greeting)
         speakText(greeting)
       }, 600)
     }
   }, [])
 
-  // TTS with ElevenLabs
+  // TTS with ElevenLabs (multilingual)
   const speakText = async (text: string) => {
     setState('speaking')
     try {
       const response = await fetch('/api/text-to-speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, language: languageRef.current }),
       })
 
       if (response.ok) {
@@ -510,9 +545,10 @@ export default function EmergencyPage() {
     setState('processing')
     
     try {
-      // Transcribe
+      // Transcribe with language support
       const formData = new FormData()
       formData.append('audio', audioBlob, 'recording.webm')
+      formData.append('language', languageRef.current)
       
       const sttResponse = await fetch('/api/speech-to-text', {
         method: 'POST',
@@ -544,6 +580,7 @@ export default function EmergencyPage() {
           conversationHistory: currentSession?.messages || [],
           currentSteps: currentSession?.steps || [],
           imageBase64: imageBase64,
+          language: languageRef.current,
         }),
       })
       
@@ -806,12 +843,51 @@ export default function EmergencyPage() {
             </div>
           </div>
           
-          <button 
-            onClick={state === 'speaking' ? stopSpeaking : undefined}
-            className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
-          >
-            {state === 'speaking' ? <VolumeX className="h-5 w-5 text-slate-600" /> : <Volume2 className="h-5 w-5 text-slate-400" />}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Language Selector */}
+            <div className="relative">
+              <button 
+                onClick={() => setShowLanguagePicker(!showLanguagePicker)}
+                className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all flex items-center gap-1.5"
+              >
+                <Globe className="h-4 w-4 text-slate-500" />
+                <span className="text-xs font-medium text-slate-600">
+                  {LANGUAGES.find(l => l.code === selectedLanguage)?.flag || '🌐'}
+                </span>
+              </button>
+              
+              {showLanguagePicker && (
+                <div className="absolute right-0 top-12 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50 w-48 max-h-72 overflow-y-auto">
+                  {LANGUAGES.map((lang) => (
+                    <button
+                      key={lang.code}
+                      onClick={() => {
+                        setSelectedLanguage(lang.code)
+                        languageRef.current = lang.code
+                        setShowLanguagePicker(false)
+                      }}
+                      className={`w-full px-4 py-2.5 text-left text-sm flex items-center gap-3 hover:bg-indigo-50 transition-colors ${
+                        selectedLanguage === lang.code ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'
+                      }`}
+                    >
+                      <span className="text-lg">{lang.flag}</span>
+                      <span>{lang.name}</span>
+                      {selectedLanguage === lang.code && (
+                        <CheckCircle2 className="h-4 w-4 text-indigo-600 ml-auto" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <button 
+              onClick={state === 'speaking' ? stopSpeaking : undefined}
+              className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
+            >
+              {state === 'speaking' ? <VolumeX className="h-5 w-5 text-slate-600" /> : <Volume2 className="h-5 w-5 text-slate-400" />}
+            </button>
+          </div>
         </header>
 
         {/* Messages */}

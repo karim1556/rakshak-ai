@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { AlertCircle, ArrowLeft, Phone, MapPin, Clock, Activity } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Phone, MapPin, Clock, Activity, Navigation, Heart, Pill, Droplets } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ResponderNavigation } from '@/components/responder-navigation'
+import { PatientHealthCard } from '@/components/patient-health-card'
 
 const mockIncidents = [
   {
@@ -14,6 +16,7 @@ const mockIncidents = [
     type: 'Medical Emergency',
     severity: 'CRITICAL',
     location: '1234 Main St, Downtown',
+    locationCoords: { lat: 28.6139, lng: 77.2090, address: '1234 Main St, Downtown' },
     description: 'Person collapsed, unconscious, not breathing',
     distance: '0.3 km',
     eta: '2 min',
@@ -21,12 +24,14 @@ const mockIncidents = [
     time: 'Now',
     age: 'Unknown',
     notes: 'Bystander performing CPR',
+    citizenId: 'citizen-001',
   },
   {
     id: '2',
     type: 'Cardiac Emergency',
     severity: 'HIGH',
     location: '567 Oak Ave, Hospital District',
+    locationCoords: { lat: 28.6200, lng: 77.2150, address: '567 Oak Ave, Hospital District' },
     description: 'Chest pain, shortness of breath',
     distance: '1.2 km',
     eta: '4 min',
@@ -34,12 +39,14 @@ const mockIncidents = [
     time: '3 min ago',
     age: '65',
     notes: 'Patient conscious and alert',
+    citizenId: 'citizen-002',
   },
   {
     id: '3',
     type: 'Trauma',
     severity: 'HIGH',
     location: 'Intersection of 5th & Main',
+    locationCoords: { lat: 28.6300, lng: 77.2200, address: 'Intersection of 5th & Main' },
     description: 'Vehicle accident, multiple injuries',
     distance: '2.1 km',
     eta: '6 min',
@@ -47,12 +54,15 @@ const mockIncidents = [
     time: '8 min ago',
     age: 'Multiple',
     notes: 'Police on scene, 3 vehicles involved',
+    citizenId: 'citizen-003',
   },
 ]
 
 export default function MedicalResponderPage() {
   const [activeIncident, setActiveIncident] = useState(mockIncidents[0])
   const [status, setStatus] = useState('en-route')
+  const [showNavigation, setShowNavigation] = useState(false)
+  const [activeTab, setActiveTab] = useState('incident')
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -166,14 +176,28 @@ export default function MedicalResponderPage() {
                     <Phone className="mr-2 h-5 w-5" />
                     Call Dispatch
                   </Button>
-                  <Button className="flex-1 bg-blue-600 hover:bg-blue-700 h-12 text-base">
-                    <MapPin className="mr-2 h-5 w-5" />
-                    Navigate
+                  <Button 
+                    onClick={() => setShowNavigation(!showNavigation)}
+                    className={`flex-1 h-12 text-base ${showNavigation ? 'bg-indigo-700 hover:bg-indigo-800' : 'bg-blue-600 hover:bg-blue-700'}`}
+                  >
+                    <Navigation className="mr-2 h-5 w-5" />
+                    {showNavigation ? 'Hide Navigation' : 'Navigate'}
                   </Button>
                   <Button variant="outline" className="border-slate-600 text-white hover:bg-slate-800 bg-transparent">
                     Report Arrived
                   </Button>
                 </div>
+
+                {/* Turn-by-Turn Navigation Panel */}
+                {showNavigation && (
+                  <ResponderNavigation 
+                    incidentLocation={activeIncident.locationCoords}
+                    onClose={() => setShowNavigation(false)}
+                  />
+                )}
+
+                {/* Patient Health Profile */}
+                <PatientHealthCard citizenId={activeIncident.citizenId} />
 
                 {/* Status Selector */}
                 <div className="space-y-2">

@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Phone, MapPin, Clock, AlertTriangle, Shield } from 'lucide-react'
+import { ArrowLeft, Phone, MapPin, Clock, AlertTriangle, Shield, Navigation } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ResponderNavigation } from '@/components/responder-navigation'
 
 const mockIncidents = [
   {
@@ -14,6 +15,7 @@ const mockIncidents = [
     type: 'Violence Reported',
     severity: 'CRITICAL',
     location: '1234 Main St, Downtown',
+    locationCoords: { lat: 28.6139, lng: 77.2090, address: '1234 Main St, Downtown' },
     description: 'Assault in progress at convenience store',
     distance: '0.5 km',
     eta: '3 min',
@@ -28,6 +30,7 @@ const mockIncidents = [
     type: 'Traffic Accident',
     severity: 'HIGH',
     location: 'Intersection of 5th & Main',
+    locationCoords: { lat: 28.6200, lng: 77.2150, address: 'Intersection of 5th & Main' },
     description: 'Multi-vehicle collision',
     distance: '1.8 km',
     eta: '5 min',
@@ -42,6 +45,7 @@ const mockIncidents = [
     type: 'Robbery',
     severity: 'HIGH',
     location: '567 Oak Ave, Bank District',
+    locationCoords: { lat: 28.6300, lng: 77.2200, address: '567 Oak Ave, Bank District' },
     description: 'Bank robbery in progress',
     distance: '2.3 km',
     eta: '6 min',
@@ -56,6 +60,7 @@ const mockIncidents = [
 export default function PoliceResponderPage() {
   const [activeIncident, setActiveIncident] = useState(mockIncidents[0])
   const [status, setStatus] = useState('en-route')
+  const [showNavigation, setShowNavigation] = useState(false)
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -184,14 +189,25 @@ export default function PoliceResponderPage() {
                     <Phone className="mr-2 h-5 w-5" />
                     Call Dispatch
                   </Button>
-                  <Button className="flex-1 bg-purple-600 hover:bg-purple-700 h-12 text-base">
-                    <MapPin className="mr-2 h-5 w-5" />
-                    Navigate
+                  <Button 
+                    onClick={() => setShowNavigation(!showNavigation)}
+                    className={`flex-1 h-12 text-base ${showNavigation ? 'bg-blue-700 hover:bg-blue-800' : 'bg-purple-600 hover:bg-purple-700'}`}
+                  >
+                    <Navigation className="mr-2 h-5 w-5" />
+                    {showNavigation ? 'Hide Navigation' : 'Navigate'}
                   </Button>
                   <Button variant="outline" className="border-slate-600 text-white hover:bg-slate-800 bg-transparent">
                     Report Arrived
                   </Button>
                 </div>
+
+                {/* Turn-by-Turn Navigation Panel */}
+                {showNavigation && (
+                  <ResponderNavigation 
+                    incidentLocation={activeIncident.locationCoords}
+                    onClose={() => setShowNavigation(false)}
+                  />
+                )}
 
                 {/* Status Selector */}
                 <div className="space-y-2">

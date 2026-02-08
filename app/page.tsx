@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Mic, Shield, Phone, Heart, Flame, ArrowRight, Radio } from 'lucide-react'
+import { Mic, Shield, Phone, Heart, Flame, ArrowRight, Radio, UserPlus } from 'lucide-react'
 
 export default function HomePage() {
   const router = useRouter()
@@ -52,7 +52,17 @@ export default function HomePage() {
             <div className="absolute inset-0 rounded-full animate-ping bg-indigo-400/10" style={{ animationDuration: '3s' }} />
           </button>
 
-          <p className="text-xs text-slate-400 mb-16">Tap to start — Voice + Camera + Location</p>
+          <p className="text-xs text-slate-400 mb-8">Tap to start — Voice + Camera + Location</p>
+
+          {/* Register CTA */}
+          <Link
+            href="/register"
+            className="inline-flex items-center gap-2.5 px-6 py-3 bg-white border-2 border-indigo-200 rounded-xl hover:border-indigo-400 hover:shadow-md transition-all shadow-sm mb-10"
+          >
+            <UserPlus className="h-4 w-4 text-indigo-600" />
+            <span className="text-sm font-semibold text-slate-700">Register &amp; Add Health Profile</span>
+            <ArrowRight className="h-3.5 w-3.5 text-indigo-400" />
+          </Link>
 
           {/* Emergency numbers */}
           <div className="flex flex-wrap justify-center gap-3">

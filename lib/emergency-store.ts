@@ -26,6 +26,7 @@ export interface EmergencySession {
   risks?: string[]
   tacticalAdvice?: string
   victims?: number
+  language: string
   location?: { lat: number; lng: number; address?: string }
   messages: Message[]
   steps: EmergencyStep[]
@@ -50,7 +51,7 @@ interface EmergencyStore {
   isConnectedToDispatch: boolean
   
   // Actions
-  startSession: () => void
+  startSession: (language?: string) => void
   endSession: () => void
   setAgentActive: (active: boolean) => void
   setListening: (listening: boolean) => void
@@ -81,10 +82,11 @@ export const useEmergencyStore = create<EmergencyStore>()(
       isConnectedToDispatch: false,
       pastSessions: [],
       
-      startSession: () => {
+      startSession: (language?: string) => {
         const newSession: EmergencySession = {
           id: `EM-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           status: 'active',
+          language: language || 'en',
           messages: [],
           steps: [],
           createdAt: Date.now(),
