@@ -1,105 +1,134 @@
-# Rakshak AI - Emergency Intelligence Platform
+# Rakshak AI - Next-Gen Emergency Intelligence Platform
 
-A multi-role emergency intelligence platform that assists civilians, medical responders, and police/rescue teams during emergencies.
+Rakshak AI is a comprehensive emergency response ecosystem designed to bridge the gap between citizens, emergency dispatchers, and first responders (`Medical`, `Police`, `Fire`). It leverages advanced AI (OpenAI GPT-4o, Real-time Voice), standard protocols (LiveKit), and long-term memory (Mem0) to provide potentially life-saving assistance.
 
-## Features
+![Rakshak AI BannerPlaceholder](https://placehold.co/1200x400/indigo/white?text=Rakshak+AI)
 
-### For Citizens
-- **Emergency Call**: Quick dial to 112
-- **AI-Powered Guidance**: Describe your emergency and get step-by-step instructions
-- **Voice Input**: Speak your emergency description using Web Speech API
-- **Voice Output**: Listen to instructions with text-to-speech
+## 🌟 Key Features
 
-### For Responders
-- **Medical Dashboard**: View and manage medical incidents
-- **Police Dashboard**: View and manage safety/security incidents  
-- **Real-time Updates**: Incidents sync across all dashboards
-- **Tactical Advice**: AI-generated guidance for responders
+### 🛡️ For Citizens
+- **AI Emergency Assistant**: A voice-first AI agent (`Rakshak`) that calms the user, gathers critical info, and automates dispatch.
+- **Multilingual Support**: Supports 10+ Indian languages (Hindi, Marathi, Tamil, etc.) with auto-detection.
+- **Real-time Guidance**: AI provides immediate, safety-first instructions (CPR, First Aid, Safety protocols) while help is on the way.
+- **Health Profile**: Integration with personal health records (Allergies, Blood Group, Conditions) automatically shared with responders.
+- **Silent Mode**: Text-based reporting for situations where speaking is dangerous.
 
-## Tech Stack
+### 📡 For Dispatchers (Control Room)
+- **Central Command Dashboard**: Real-time view of all active emergencies on a unified map.
+- **Live Monitoring**: Listen/Read live transcriptions of citizen-AI conversations as they happen.
+- **Resource Management**: Auto-dispatch closest responders or manually assign specific units.
+- **Spam Guard**: AI-powered analysis to flag and filter non-emergency or prank calls.
 
-- **Framework**: Next.js 16 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **UI Components**: ShadCN UI
-- **AI**: OpenAI GPT-4 via AI SDK
-- **State Management**: Zustand
-- **Voice**: Web Speech API + LiveKit (optional)
-- **Maps**: Leaflet + OpenStreetMap
+### 🚑 For Responders (Medical / Police / Fire)
+- **Dedicated Dashboards**: Role-specific views (e.g., EMS sees patient vitals; Police see incident threat level).
+- **Navigation**: Integrated routing to the incident location.
+- **Contextual Intelligence**: Receive AI-summarized incident reports and patient health data *before* arriving on scene.
 
-## Getting Started
+## 🏗️ Tech Stack
+
+- **Framework**: `Next.js 16` (App Router)
+- **Language**: `TypeScript`
+- **Database & Auth**: `Supabase` (PostgreSQL, Realtime, Auth)
+- **AI Core**: `OpenAI GPT-4o` (via Vercel AI SDK)
+- **Voice & Real-time**: `LiveKit` (WebRTC), `Web Speech API`
+- **Memory**: `Mem0` (User context & session history)
+- **Maps**: `Leaflet` / `React-Leaflet`
+- **Styling**: `Tailwind CSS`, `ShadCN UI`
+- **State**: `Zustand`
+
+## 🚀 Getting Started
 
 ### Prerequisites
+
 - Node.js 18+
 - pnpm (recommended) or npm
+- Supabase Project
+- OpenAI API Key
+- LiveKit Project (for voice features)
+- Mem0 API Key (for memory features)
 
 ### Installation
 
-```bash
-# Install dependencies
-pnpm install
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/rakshak-ai.git
+   cd rakshak-ai
+   ```
 
-# Copy environment variables
-cp .env.example .env.local
+2. **Install dependencies**
+   ```bash
+   pnpm install
+   ```
 
-# Add your OpenAI API key to .env.local
-# OPENAI_API_KEY=your_key_here
+3. **Environment Setup**
+   Copy the example env file (or create new):
+   ```bash
+   cp .env.example .env.local
+   ```
 
-# Start development server
-pnpm dev
-```
+   Fill in your API keys in `.env.local`:
+   ```env
+   # OpenAI
+   OPENAI_API_KEY=sk-...
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+   # Supabase
+   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-## App Routes
+   # LiveKit (Voice)
+   LIVEKIT_API_KEY=your-key
+   LIVEKIT_API_SECRET=your-secret
+   NEXT_PUBLIC_LIVEKIT_URL=wss://your-project.livekit.cloud
+
+   # Mem0 (Memory)
+   MEM0_API_KEY=your-mem0-key
+   ```
+
+4. **Database Setup**
+   Run the SQL migrations located in `supabase/` folder in your Supabase SQL Editor to set up the schema.
+
+5. **Run the development server**
+   ```bash
+   pnpm dev
+   ```
+
+   Open [http://localhost:3000](http://localhost:3000) to view the application.
+
+## 📱 App Routes
 
 | Route | Description |
 |-------|-------------|
-| `/` | Home - Two big buttons: Call Emergency & Get Help |
-| `/situation` | Describe emergency with voice/text + scenario selection |
-| `/guidance` | Step-by-step AI instructions with voice playback |
-| `/dashboard/medical` | Medical responder dashboard |
-| `/dashboard/police` | Police responder dashboard |
+| `/` | **Home**: Landing page with quick access to Emergency & Login. |
+| `/emergency` | **AI Assistant**: Voice-enabled emergency reporting interface. |
+| `/citizen` | **Manual Report**: Form-based reporting for citizens. |
+| `/dashboard/dispatch` | **Control Room**: Map & list view of all incidents for dispatchers. |
+| `/dashboard/medical` | **EMS Dashboard**: Medical incidents and patient data. |
+| `/dashboard/police` | **Police Dashboard**: Security incidents and crime reporting. |
+| `/dashboard/fire` | **Fire Dashboard**: Fire & Rescue incidents. |
+| `/health-profile` | **Profile**: User settings and medical history setup. |
 
-## API Endpoints
+## 🧩 Architecture Highlights
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/analyze` | POST | AI analysis of emergency situation |
-| `/api/incidents` | GET/POST | Incident CRUD operations |
-| `/api/livekit-token` | POST | Generate LiveKit voice tokens |
+### The Emergency Agent (`/api/emergency-agent`)
+The core reasoning engine. It:
+1. Receives voice/text input.
+2. Analyzes severity and category.
+3. Consults `Mem0` for past user context.
+4. Generates a safety-first response.
+5. Updates the Supabase database in real-time.
+6. Triggers `auto-dispatch` if severity is critical.
 
-## Demo Flow
+### Spam Detection (`/api/spam-review`)
+A background process that analyzes call patterns and transcripts to identify potential misuse, protecting responder resources.
 
-1. Open the app at `/`
-2. Click "What should I do?"
-3. Select emergency type (Medical/Fire/Safety)
-4. Describe: "My father collapsed and is not breathing"
-5. Click "Get Instructions"
-6. Follow step-by-step guidance
-7. Incident appears in Medical Dashboard
+### Community Alerts (`/api/community-alerts`)
+Geolocation-based notifications sent to nearby users when high-priority incidents (e.g., Fire, Active Shooter) are verified.
 
-## Environment Variables
+## 🤝 Contributing
 
-```env
-# Required
-OPENAI_API_KEY=your_openai_api_key
+ Contributions are welcome! Please feel free to submit a Pull Request.
 
-# Optional (for voice communication)
-LIVEKIT_API_KEY=your_livekit_key
-LIVEKIT_API_SECRET=your_livekit_secret
-LIVEKIT_URL=wss://your-server.livekit.cloud
-```
-
-## AI Behavior
-
-The AI is designed to be:
-- ✅ Calm and professional
-- ✅ Short, direct instructions
-- ✅ Safety-first focused
-- ✅ Never authoritative/diagnostic
-- ✅ Always recommends calling emergency services
-
-## License
+## 📄 License
 
 MIT
