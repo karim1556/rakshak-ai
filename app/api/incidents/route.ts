@@ -1,120 +1,124 @@
-// Mock database - in production, use a real database
-const incidents: any[] = [
-  {
-    id: '1',
-    type: 'Medical Emergency',
-    severity: 'CRITICAL',
-    status: 'Active',
-    location: '1234 Main St, Downtown',
-    description: 'Person collapsed, unconscious, not breathing',
-    reportedAt: new Date(),
-    respondersAssigned: ['Unit12', 'Unit7'],
-    notes: [],
-  },
-  {
-    id: '2',
-    type: 'Violence Reported',
-    severity: 'CRITICAL',
-    status: 'Active',
-    location: '567 Oak Ave',
-    description: 'Assault in progress',
-    reportedAt: new Date(),
-    respondersAssigned: ['Unit8', 'Unit15'],
-    notes: [],
-  },
-]
+import { NextRequest, NextResponse } from 'next/server'
+import { createServerClient } from '@/lib/supabase'
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const supabase = createServerClient()
   try {
     const { searchParams } = new URL(request.url)
     const filter = searchParams.get('filter')
+    const type = searchParams.get('type')
 
-    let filteredIncidents = incidents
+    let query = supabase
+      .from('incidents')
+      .select('*')
+      .order('created_at', { ascending: false })
 
     if (filter && filter !== 'all') {
-      filteredIncidents = incidents.filter((inc) => inc.status === filter || inc.severity === filter)
+      // Filter could be status or severity
+      const statuses = ['active', 'assigned', 'en_route', 'on_scene', 'resolved']
+      const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
+      if (statuses.includes(filter)) {
+        query = query.eq('status', filter)
+      } else if (severities.includes(filter)) {
+        query = query.eq('severity', filter)
+      }
     }
 
-    return Response.json({
-      incidents: filteredIncidents,
-      total: filteredIncidents.length,
+    if (type) {
+      query = query.eq('type', type)
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      console.error('Fetch incidents error:', error)
+      return NextResponse.json({ error: 'Failed to fetch incidents' }, { status: 500 })
+    }
+
+    return NextResponse.json({
+      incidents: data || [],
+      total: data?.length || 0,
     })
   } catch (error) {
     console.error('Fetch incidents error:', error)
-    return Response.json({ error: 'Failed to fetch incidents' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to fetch incidents' }, { status: 500 })
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const supabase = createServerClient()
   try {
     const body = await request.json()
-    const { type, severity, location, description, reportedBy, coordinates } = body
+    const { type, severity, location, description, summary, reportedBy, citizenId, citizenName, citizenPhone, coordinates } = body
 
-    const newIncident = {
-      id: String(incidents.length + 1),
-      type,
-      severity,
-      status: 'Active',
-      location,
-      description,
-      reportedAt: new Date(),
-      reportedBy,
-      coordinates,
-      respondersAssigned: [],
-      notes: [],
-      timeline: [
-        {
-          time: new Date().toISOString(),
-          event: 'Incident reported',
-          type: 'report',
-        },
-      ],
+    const newIncident: Record<string, any> = {
+      type: type || 'other',
+      severity: severity || 'MEDIUM',
+      summary: summary || type || 'Emergency',
+      description: description || 'Emergency reported',
+      status: 'active',
+      reported_by: reportedBy || null,
+      citizen_identifier: citizenId || null,
+      citizen_name: citizenName || null,
+      citizen_phone: citizenPhone || null,
     }
 
-    incidents.push(newIncident)
+    if (coordinates?.lat || location) {
+      newIncident.location_lat = coordinates?.lat || null
+      newIncident.location_lng = coordinates?.lng || null
+      newIncident.location_address = typeof location === 'string' ? location : location?.address || null
+    }
 
-    return Response.json(
-      {
-        success: true,
-        incident: newIncident,
-      },
-      { status: 201 }
-    )
+    const { data, error } = await supabase
+      .from('incidents')
+      .insert(newIncident)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Create incident error:', error)
+      return NextResponse.json({ error: 'Failed to create incident' }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true, incident: data }, { status: 201 })
   } catch (error) {
     console.error('Create incident error:', error)
-    return Response.json({ error: 'Failed to create incident' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to create incident' }, { status: 500 })
   }
 }
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
+  const supabase = createServerClient()
   try {
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
     const body = await request.json()
 
-    const incident = incidents.find((inc) => inc.id === id)
-    if (!incident) {
-      return Response.json({ error: 'Incident not found' }, { status: 404 })
+    if (!id) {
+      return NextResponse.json({ error: 'Incident ID required' }, { status: 400 })
     }
 
-    // Update incident
-    Object.assign(incident, body)
+    const updates: Record<string, any> = {}
+    if (body.status) updates.status = body.status
+    if (body.severity) updates.severity = body.severity
+    if (body.tactical_advice) updates.tactical_advice = body.tactical_advice
+    if (body.dispatch_notes) updates.dispatch_notes = body.dispatch_notes
 
-    // Add timeline entry
-    if (body.status && incident.timeline) {
-      incident.timeline.push({
-        time: new Date().toISOString(),
-        event: `Status updated to ${body.status}`,
-        type: 'update',
-      })
+    const { data, error } = await supabase
+      .from('incidents')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Update incident error:', error)
+      return NextResponse.json({ error: 'Failed to update incident' }, { status: 500 })
     }
 
-    return Response.json({
-      success: true,
-      incident,
-    })
+    return NextResponse.json({ success: true, incident: data })
   } catch (error) {
     console.error('Update incident error:', error)
-    return Response.json({ error: 'Failed to update incident' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to update incident' }, { status: 500 })
   }
 }

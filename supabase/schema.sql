@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS incidents (
   location_lng DECIMAL(11, 8),
   location_address TEXT,
   reported_by TEXT,
+  -- Citizen identity fields
+  citizen_identifier TEXT,
+  citizen_name TEXT,
+  citizen_phone TEXT,
   language TEXT DEFAULT 'en',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -65,6 +69,10 @@ CREATE TABLE IF NOT EXISTS escalated_sessions (
   priority INTEGER DEFAULT 3,
   language TEXT DEFAULT 'en',
   image_snapshot TEXT,
+  -- Citizen identity fields (links to health_profiles)
+  citizen_identifier TEXT,
+  citizen_name TEXT,
+  citizen_phone TEXT,
   escalated_at TIMESTAMPTZ DEFAULT NOW(),
   resolved_at TIMESTAMPTZ,
   qa_report JSONB,
@@ -327,6 +335,13 @@ CREATE INDEX IF NOT EXISTS idx_health_profiles_citizen ON health_profiles(citize
 -- RLS
 ALTER TABLE health_profiles ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Anyone can create a health profile" ON health_profiles;
+DROP POLICY IF EXISTS "Authenticated users can read health profiles" ON health_profiles;
+DROP POLICY IF EXISTS "Public emergency access to health profiles" ON health_profiles;
+DROP POLICY IF EXISTS "Anyone can update their own health profile" ON health_profiles;
+DROP POLICY IF EXISTS "Anyone can delete their own health profile" ON health_profiles;
+
 -- Allow public insert (citizens creating their own profiles)
 CREATE POLICY "Anyone can create a health profile" ON health_profiles FOR INSERT TO anon, authenticated WITH CHECK (true);
 
@@ -343,7 +358,12 @@ CREATE POLICY "Anyone can update their own health profile" ON health_profiles FO
 CREATE POLICY "Anyone can delete their own health profile" ON health_profiles FOR DELETE TO anon, authenticated USING (true);
 
 -- Enable realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE health_profiles;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE health_profiles;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ============================================================================
 -- DEMO ACCOUNTS SETUP

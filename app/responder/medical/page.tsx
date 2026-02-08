@@ -10,59 +10,62 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ResponderNavigation } from '@/components/responder-navigation'
 import { PatientHealthCard } from '@/components/patient-health-card'
 
-const mockIncidents = [
-  {
-    id: '1',
-    type: 'Medical Emergency',
-    severity: 'CRITICAL',
-    location: '1234 Main St, Downtown',
-    locationCoords: { lat: 28.6139, lng: 77.2090, address: '1234 Main St, Downtown' },
-    description: 'Person collapsed, unconscious, not breathing',
-    distance: '0.3 km',
-    eta: '2 min',
-    status: 'Assigned',
-    time: 'Now',
-    age: 'Unknown',
-    notes: 'Bystander performing CPR',
-    citizenId: 'citizen-001',
-  },
-  {
-    id: '2',
-    type: 'Cardiac Emergency',
-    severity: 'HIGH',
-    location: '567 Oak Ave, Hospital District',
-    locationCoords: { lat: 28.6200, lng: 77.2150, address: '567 Oak Ave, Hospital District' },
-    description: 'Chest pain, shortness of breath',
-    distance: '1.2 km',
-    eta: '4 min',
-    status: 'Assigned',
-    time: '3 min ago',
-    age: '65',
-    notes: 'Patient conscious and alert',
-    citizenId: 'citizen-002',
-  },
-  {
-    id: '3',
-    type: 'Trauma',
-    severity: 'HIGH',
-    location: 'Intersection of 5th & Main',
-    locationCoords: { lat: 28.6300, lng: 77.2200, address: 'Intersection of 5th & Main' },
-    description: 'Vehicle accident, multiple injuries',
-    distance: '2.1 km',
-    eta: '6 min',
-    status: 'Pending',
-    time: '8 min ago',
-    age: 'Multiple',
-    notes: 'Police on scene, 3 vehicles involved',
-    citizenId: 'citizen-003',
-  },
-]
+import { supabase } from '@/lib/supabase'
 
 export default function MedicalResponderPage() {
-  const [activeIncident, setActiveIncident] = useState(mockIncidents[0])
+  const [incidents, setIncidents] = useState<any[]>([])
+  const [activeIncident, setActiveIncident] = useState<any>(null)
   const [status, setStatus] = useState('en-route')
   const [showNavigation, setShowNavigation] = useState(false)
   const [activeTab, setActiveTab] = useState('incident')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const loadIncidents = async () => {
+      const { data } = await supabase
+        .from('incidents')
+        .select('*')
+        .in('type', ['medical', 'accident'])
+        .neq('status', 'resolved')
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      const mapped = (data || []).map(inc => ({
+        id: inc.id,
+        type: inc.summary || inc.type || 'Medical Emergency',
+        severity: inc.severity,
+        location: inc.location_address || 'Unknown location',
+        locationCoords: inc.location_lat ? { 
+          lat: Number(inc.location_lat), 
+          lng: Number(inc.location_lng), 
+          address: inc.location_address 
+        } : undefined,
+        description: inc.description || '',
+        distance: '—',
+        eta: '—',
+        status: inc.status,
+        time: new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        notes: inc.tactical_advice || '',
+        citizenId: inc.citizen_identifier || inc.reported_by || '',
+        citizenName: inc.citizen_name || null,
+        citizenPhone: inc.citizen_phone || null,
+      }))
+
+      setIncidents(mapped)
+      if (mapped.length > 0 && !activeIncident) setActiveIncident(mapped[0])
+      setLoading(false)
+    }
+
+    loadIncidents()
+
+    // Subscribe to realtime changes
+    const channel = supabase
+      .channel('medical-responder-incidents')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, () => loadIncidents())
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -107,18 +110,37 @@ export default function MedicalResponderPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <Badge className={`${getSeverityColor(activeIncident.severity)} text-lg px-4 py-2`}>
-              {activeIncident.severity}
-            </Badge>
+            {activeIncident && (
+              <Badge className={`${getSeverityColor(activeIncident.severity)} text-lg px-4 py-2`}>
+                {activeIncident.severity}
+              </Badge>
+            )}
             <Button className="bg-red-600 hover:bg-red-700">End Shift</Button>
           </div>
         </div>
       </div>
 
       <div className="container mx-auto px-4 py-8">
+        {loading && (
+          <div className="text-center py-12"><p className="text-blue-400 text-lg">Loading incidents...</p></div>
+        )}
+        {!loading && incidents.length === 0 && (
+          <div className="text-center py-12"><p className="text-slate-400 text-lg">No active medical incidents</p></div>
+        )}
+        {!loading && activeIncident && (
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Main Incident Details */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Citizen Info Banner */}
+            {(activeIncident.citizenName || activeIncident.citizenPhone) && (
+              <div className="rounded-lg border border-blue-800 bg-blue-900/40 p-4 flex items-center gap-4">
+                <Heart className="h-5 w-5 text-pink-400" />
+                <div>
+                  <p className="text-white font-semibold">{activeIncident.citizenName || 'Unknown Citizen'}</p>
+                  {activeIncident.citizenPhone && <p className="text-blue-300 text-sm">{activeIncident.citizenPhone}</p>}
+                </div>
+              </div>
+            )}
             {/* Active Incident Card */}
             <Card className="border-blue-900 bg-blue-900/30 backdrop-blur">
               <CardHeader>
@@ -144,10 +166,10 @@ export default function MedicalResponderPage() {
                     </div>
                   </div>
                   <div className="flex gap-3 items-start">
-                    <Activity className="h-5 w-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                    <Clock className="h-5 w-5 text-blue-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm text-blue-300">Patient Age</p>
-                      <p className="text-white font-semibold">{activeIncident.age}</p>
+                      <p className="text-sm text-blue-300">Reported</p>
+                      <p className="text-white font-semibold">{activeIncident.time}</p>
                     </div>
                   </div>
                 </div>
@@ -225,7 +247,7 @@ export default function MedicalResponderPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {mockIncidents.map((incident) => (
+                  {incidents.map((incident) => (
                     <div
                       key={incident.id}
                       onClick={() => setActiveIncident(incident)}
@@ -264,7 +286,7 @@ export default function MedicalResponderPage() {
               <CardContent className="space-y-4">
                 <div className="flex justify-between items-center py-2 border-b border-blue-800">
                   <span className="text-slate-400">Active Incidents</span>
-                  <span className="text-2xl font-bold text-white">3</span>
+                  <span className="text-2xl font-bold text-white">{incidents.length}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-blue-800">
                   <span className="text-slate-400">Calls Today</span>
@@ -315,6 +337,7 @@ export default function MedicalResponderPage() {
             </Card>
           </div>
         </div>
+        )}
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Phone, MapPin, Clock, AlertTriangle, Shield, Navigation } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -8,59 +8,61 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ResponderNavigation } from '@/components/responder-navigation'
-
-const mockIncidents = [
-  {
-    id: '1',
-    type: 'Violence Reported',
-    severity: 'CRITICAL',
-    location: '1234 Main St, Downtown',
-    locationCoords: { lat: 28.6139, lng: 77.2090, address: '1234 Main St, Downtown' },
-    description: 'Assault in progress at convenience store',
-    distance: '0.5 km',
-    eta: '3 min',
-    status: 'Assigned',
-    time: 'Now',
-    suspect: 'Male, approx 6ft, dark hoodie',
-    witnesses: '2',
-    notes: 'Armed with knife, still on premises',
-  },
-  {
-    id: '2',
-    type: 'Traffic Accident',
-    severity: 'HIGH',
-    location: 'Intersection of 5th & Main',
-    locationCoords: { lat: 28.6200, lng: 77.2150, address: 'Intersection of 5th & Main' },
-    description: 'Multi-vehicle collision',
-    distance: '1.8 km',
-    eta: '5 min',
-    status: 'Assigned',
-    time: '2 min ago',
-    suspect: 'Hit and run suspected',
-    witnesses: '5',
-    notes: 'Traffic backed up, hazmat not needed',
-  },
-  {
-    id: '3',
-    type: 'Robbery',
-    severity: 'HIGH',
-    location: '567 Oak Ave, Bank District',
-    locationCoords: { lat: 28.6300, lng: 77.2200, address: '567 Oak Ave, Bank District' },
-    description: 'Bank robbery in progress',
-    distance: '2.3 km',
-    eta: '6 min',
-    status: 'Pending',
-    time: '5 min ago',
-    suspect: 'Unknown, possibly 2 individuals',
-    witnesses: '20+',
-    notes: 'Suspects may be armed',
-  },
-]
+import { supabase } from '@/lib/supabase'
 
 export default function PoliceResponderPage() {
-  const [activeIncident, setActiveIncident] = useState(mockIncidents[0])
+  const [incidents, setIncidents] = useState<any[]>([])
+  const [activeIncident, setActiveIncident] = useState<any>(null)
   const [status, setStatus] = useState('en-route')
   const [showNavigation, setShowNavigation] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const loadIncidents = async () => {
+      const { data } = await supabase
+        .from('incidents')
+        .select('*')
+        .in('type', ['police', 'violence', 'crime', 'theft', 'accident'])
+        .neq('status', 'resolved')
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      const mapped = (data || []).map(inc => ({
+        id: inc.id,
+        type: inc.summary || inc.type || 'Police Incident',
+        severity: inc.severity,
+        location: inc.location_address || 'Unknown location',
+        locationCoords: inc.location_lat ? {
+          lat: Number(inc.location_lat),
+          lng: Number(inc.location_lng),
+          address: inc.location_address
+        } : undefined,
+        description: inc.description || '',
+        distance: '—',
+        eta: '—',
+        status: inc.status,
+        time: new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        notes: inc.tactical_advice || '',
+        suspect: '',
+        witnesses: '',
+        citizenName: inc.citizen_name || null,
+        citizenPhone: inc.citizen_phone || null,
+      }))
+
+      setIncidents(mapped)
+      if (mapped.length > 0 && !activeIncident) setActiveIncident(mapped[0])
+      setLoading(false)
+    }
+
+    loadIncidents()
+
+    const channel = supabase
+      .channel('police-responder-incidents')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, () => loadIncidents())
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -105,18 +107,37 @@ export default function PoliceResponderPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <Badge className={`${getSeverityColor(activeIncident.severity)} text-lg px-4 py-2`}>
-              {activeIncident.severity}
-            </Badge>
+            {activeIncident && (
+              <Badge className={`${getSeverityColor(activeIncident.severity)} text-lg px-4 py-2`}>
+                {activeIncident.severity}
+              </Badge>
+            )}
             <Button className="bg-red-600 hover:bg-red-700">End Shift</Button>
           </div>
         </div>
       </div>
 
       <div className="container mx-auto px-4 py-8">
+        {loading && (
+          <div className="text-center py-12"><p className="text-purple-400 text-lg">Loading incidents...</p></div>
+        )}
+        {!loading && incidents.length === 0 && (
+          <div className="text-center py-12"><p className="text-slate-400 text-lg">No active police incidents</p></div>
+        )}
+        {!loading && activeIncident && (
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Main Incident Details */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Citizen Info Banner */}
+            {(activeIncident.citizenName || activeIncident.citizenPhone) && (
+              <div className="rounded-lg border border-purple-800 bg-purple-900/40 p-4 flex items-center gap-4">
+                <Shield className="h-5 w-5 text-purple-400" />
+                <div>
+                  <p className="text-white font-semibold">{activeIncident.citizenName || 'Unknown Citizen'}</p>
+                  {activeIncident.citizenPhone && <p className="text-purple-300 text-sm">{activeIncident.citizenPhone}</p>}
+                </div>
+              </div>
+            )}
             {/* Active Incident Card */}
             <Card className="border-purple-900 bg-purple-900/30 backdrop-blur">
               <CardHeader>
@@ -235,7 +256,7 @@ export default function PoliceResponderPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {mockIncidents.map((incident) => (
+                  {incidents.map((incident) => (
                     <div
                       key={incident.id}
                       onClick={() => setActiveIncident(incident)}
@@ -274,7 +295,7 @@ export default function PoliceResponderPage() {
               <CardContent className="space-y-4">
                 <div className="flex justify-between items-center py-2 border-b border-purple-800">
                   <span className="text-slate-400">Active Incidents</span>
-                  <span className="text-2xl font-bold text-white">3</span>
+                  <span className="text-2xl font-bold text-white">{incidents.length}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-purple-800">
                   <span className="text-slate-400">Calls Today</span>
@@ -346,6 +367,7 @@ export default function PoliceResponderPage() {
             </Card>
           </div>
         </div>
+        )}
       </div>
     </div>
   )

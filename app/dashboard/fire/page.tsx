@@ -329,6 +329,17 @@ function FireContent() {
 
                 {selected.description && <p className="text-xs text-slate-500 leading-relaxed">{selected.description}</p>}
 
+                {/* Citizen Info */}
+                {(selected.citizen_name || selected.citizen_phone) && (
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 shadow-sm">
+                    <p className="text-[10px] text-indigo-700 font-semibold mb-1 uppercase tracking-wider">Caller Info</p>
+                    <div className="flex items-center gap-3 text-xs">
+                      {selected.citizen_name && <span className="font-semibold text-indigo-900">{selected.citizen_name}</span>}
+                      {selected.citizen_phone && <span className="text-indigo-600">{selected.citizen_phone}</span>}
+                    </div>
+                  </div>
+                )}
+
                 {selected.tactical_advice && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 shadow-sm">
                     <p className="text-[10px] text-amber-700 font-semibold mb-1 flex items-center gap-1.5 uppercase tracking-wider">

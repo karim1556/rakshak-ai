@@ -125,6 +125,10 @@ export default function RegisterPage() {
         }),
       })
       if (res.ok) {
+        // Save key citizen info to localStorage for emergency flow
+        if (fullName) localStorage.setItem('rakshak-citizen-name', fullName)
+        if (phoneNumber) localStorage.setItem('rakshak-citizen-phone', phoneNumber)
+        if (email) localStorage.setItem('rakshak-citizen-email', email)
         setSaved(true)
         setTimeout(() => setSaved(false), 3000)
       }

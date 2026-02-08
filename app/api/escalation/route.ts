@@ -34,6 +34,10 @@ export async function GET() {
     imageSnapshot: row.image_snapshot,
     qaReport: row.qa_report,
     spamVerdict: row.spam_verdict,
+    // Citizen identity
+    citizenId: row.citizen_identifier || null,
+    citizenName: row.citizen_name || null,
+    citizenPhone: row.citizen_phone || null,
   }))
 
   return NextResponse.json({ sessions })
@@ -76,6 +80,10 @@ export async function POST(req: NextRequest) {
       priority: session.severity === 'CRITICAL' ? 1 : session.severity === 'HIGH' ? 2 : 3,
       language: session.language || 'en',
       image_snapshot: session.imageSnapshot || null,
+      // Citizen identity
+      citizen_identifier: session.citizenId || null,
+      citizen_name: session.citizenName || null,
+      citizen_phone: session.citizenPhone || null,
       escalated_at: new Date().toISOString(),
       spam_verdict: spamMetadata,
     })
@@ -103,6 +111,10 @@ export async function POST(req: NextRequest) {
       location_lng: session.location?.lng || null,
       location_address: session.location?.address || null,
       reported_by: session.id,
+      // Citizen identity
+      citizen_identifier: session.citizenId || null,
+      citizen_name: session.citizenName || null,
+      citizen_phone: session.citizenPhone || null,
       language: session.language || 'en',
     }).select('id').single()
 
@@ -116,6 +128,27 @@ export async function POST(req: NextRequest) {
       await supabase.from('escalated_sessions')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', session.id)
+    }
+
+    // Auto-notify emergency contacts if citizen is identified
+    if (session.citizenId) {
+      try {
+        const baseUrl = req.nextUrl.origin || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+        await fetch(`${baseUrl}/api/emergency-contacts`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            citizenId: session.citizenId,
+            sessionId: session.id,
+            emergencyType: session.type || 'emergency',
+            summary: session.summary || 'Emergency reported',
+            location: session.location?.address || `${session.location?.lat}, ${session.location?.lng}`,
+          }),
+        })
+      } catch (notifyErr) {
+        console.error('Emergency contact notification error:', notifyErr)
+        // Non-blocking — don't fail the escalation if notifications fail
+      }
     }
 
     return NextResponse.json({

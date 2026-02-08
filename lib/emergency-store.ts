@@ -36,6 +36,10 @@ export interface EmergencySession {
     role: string
     unit: string
   }
+  // Citizen identity — populated from registration/localStorage
+  citizenId?: string
+  citizenName?: string
+  citizenPhone?: string
   createdAt: number
   escalatedAt?: number
   isEscalated?: boolean
@@ -83,12 +87,25 @@ export const useEmergencyStore = create<EmergencyStore>()(
       pastSessions: [],
       
       startSession: (language?: string) => {
+        // Load citizen identity from localStorage (set during registration)
+        let citizenId: string | undefined
+        let citizenName: string | undefined
+        let citizenPhone: string | undefined
+        if (typeof window !== 'undefined') {
+          citizenId = localStorage.getItem('rakshak-citizen-id') || undefined
+          citizenName = localStorage.getItem('rakshak-citizen-name') || undefined
+          citizenPhone = localStorage.getItem('rakshak-citizen-phone') || undefined
+        }
+
         const newSession: EmergencySession = {
           id: `EM-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           status: 'active',
           language: language || 'en',
           messages: [],
           steps: [],
+          citizenId,
+          citizenName,
+          citizenPhone,
           createdAt: Date.now(),
         }
         set({ 

@@ -11,6 +11,7 @@ import {
   Mic, MicOff
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth-guard'
+import { PatientHealthCard } from '@/components/patient-health-card'
 import { supabase } from '@/lib/supabase'
 import { useCall } from '@/lib/use-call'
 import { haversineDistance, formatDistance, estimateETA } from '@/lib/utils'
@@ -31,6 +32,10 @@ interface Session {
   language?: string
   imageSnapshot?: string
   qaReport?: any
+  // Citizen identity
+  citizenId?: string | null
+  citizenName?: string | null
+  citizenPhone?: string | null
 }
 
 const typeIcons: Record<string, any> = {
@@ -514,6 +519,13 @@ function DispatchContent() {
                           </>
                         )}
                       </div>
+                      {s.citizenName && (
+                        <div className="flex items-center gap-1 mt-0.5 text-[10px] text-indigo-600 font-medium">
+                          <Users className="h-2.5 w-2.5" />
+                          {s.citizenName}
+                          {s.citizenPhone && <span className="text-slate-400">· {s.citizenPhone}</span>}
+                        </div>
+                      )}
                       {s.assignedResponder && (
                         <div className="flex items-center gap-1 mt-1 text-[10px] text-emerald-600 font-medium">
                           <UserCheck className="h-2.5 w-2.5" />
@@ -647,6 +659,31 @@ function DispatchContent() {
                       <PhoneOff className="h-4 w-4" />
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* Citizen Info Banner */}
+              {(selected.citizenName || selected.citizenPhone) && (
+                <div className="mx-4 mt-3 p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl flex items-center gap-3 text-xs flex-shrink-0 shadow-sm">
+                  <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
+                    <Users className="h-4 w-4 text-indigo-600" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-semibold text-indigo-900">{selected.citizenName || 'Unknown Caller'}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-indigo-600">
+                      {selected.citizenPhone && (
+                        <span className="flex items-center gap-1">
+                          <Phone className="h-2.5 w-2.5" /> {selected.citizenPhone}
+                        </span>
+                      )}
+                      {selected.citizenId && (
+                        <span className="text-indigo-400">ID: {selected.citizenId.slice(0, 20)}...</span>
+                      )}
+                    </div>
+                  </div>
+                  {selected.citizenId && (
+                    <span className="text-[9px] px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full border border-indigo-200 font-semibold">Registered</span>
+                  )}
                 </div>
               )}
 
@@ -803,6 +840,13 @@ function DispatchContent() {
                       <p className="text-[10px] text-slate-400 text-center py-6">No steps generated yet</p>
                     )}
                   </div>
+
+                  {/* Patient Health Card */}
+                  {selected.citizenId && (
+                    <div className="p-2.5 border-t border-slate-200/60">
+                      <PatientHealthCard citizenId={selected.citizenId} className="" />
+                    </div>
+                  )}
 
                   {/* Camera Snapshot */}
                   {selected.imageSnapshot && (

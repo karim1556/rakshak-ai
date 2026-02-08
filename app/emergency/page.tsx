@@ -254,6 +254,9 @@ export default function EmergencyPage() {
           messages: currentSession.messages,
           steps: currentSession.steps,
           imageSnapshot: imageBase64,
+          citizenId: currentSession.citizenId,
+          citizenName: currentSession.citizenName,
+          citizenPhone: currentSession.citizenPhone,
         }),
       })
 
@@ -620,6 +623,9 @@ export default function EmergencyPage() {
             risks: aiData.sessionInfo?.risks || [],
             tacticalAdvice: aiData.sessionInfo?.tacticalAdvice || '',
             imageSnapshot: snapshot,
+            citizenId: s.citizenId,
+            citizenName: s.citizenName,
+            citizenPhone: s.citizenPhone,
           }),
         }).then(r => r.json()).then(data => {
           if (data.success) {
@@ -703,6 +709,9 @@ export default function EmergencyPage() {
           risks: currentSession.risks || [],
           tacticalAdvice: currentSession.tacticalAdvice || '',
           imageSnapshot: imageBase64,
+          citizenId: currentSession.citizenId,
+          citizenName: currentSession.citizenName,
+          citizenPhone: currentSession.citizenPhone,
         }),
       })
       

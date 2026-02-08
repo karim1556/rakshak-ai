@@ -2,42 +2,45 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { useAuth, getDashboardPath, type UserRole } from '@/lib/auth-context'
 import { Loader2 } from 'lucide-react'
 
-export function AuthGuard({ children }: { children: React.ReactNode }) {
+interface AuthGuardProps {
+  children: React.ReactNode
+  allowedRoles?: UserRole[]
+}
+
+export function AuthGuard({ children, allowedRoles }: AuthGuardProps) {
   const router = useRouter()
-  const [loading, setLoading] = useState(true)
-  const [authenticated, setAuthenticated] = useState(false)
+  const { isAuthenticated, isLoading, profile } = useAuth()
+  const [checked, setChecked] = useState(false)
 
   useEffect(() => {
-    const check = async () => {
-      // Check demo auth
-      if (localStorage.getItem('rakshak-auth') === 'demo') {
-        setAuthenticated(true)
-        setLoading(false)
-        return
-      }
-      // Check Supabase auth
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session) {
-        setAuthenticated(true)
-      } else {
-        router.replace('/login')
-      }
-      setLoading(false)
-    }
-    check()
-  }, [router])
+    if (isLoading) return
 
-  if (loading) {
+    if (!isAuthenticated) {
+      router.replace('/login')
+      return
+    }
+
+    // Check role-based access
+    if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {
+      // Redirect to their correct dashboard
+      router.replace(getDashboardPath(profile.role))
+      return
+    }
+
+    setChecked(true)
+  }, [isAuthenticated, isLoading, profile, router, allowedRoles])
+
+  if (isLoading || !checked) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <Loader2 className="h-6 w-6 text-zinc-500 animate-spin" />
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/20 flex items-center justify-center">
+        <Loader2 className="h-6 w-6 text-indigo-500 animate-spin" />
       </div>
     )
   }
 
-  if (!authenticated) return null
+  if (!isAuthenticated) return null
   return <>{children}</>
 }
