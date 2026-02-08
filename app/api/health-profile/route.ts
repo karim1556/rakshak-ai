@@ -11,22 +11,47 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'citizenId or sessionId required' }, { status: 400 })
     }
 
-    let query = supabase
-      .from('health_profiles')
-      .select('*')
-
+    // Try exact match first
     if (citizenId) {
-      query = query.eq('citizen_identifier', citizenId)
+      const { data, error } = await supabase
+        .from('health_profiles')
+        .select('*')
+        .eq('citizen_identifier', citizenId)
+        .maybeSingle()
+
+      if (data) {
+        return NextResponse.json({ profile: data })
+      }
+
+      // If citizenId looks like a session ID (EM-xxx), extract timestamp and search by it
+      const tsMatch = citizenId.match(/(\d{13})/)
+      if (tsMatch) {
+        const { data: fuzzyData } = await supabase
+          .from('health_profiles')
+          .select('*')
+          .like('citizen_identifier', `%${tsMatch[1]}%`)
+          .maybeSingle()
+
+        if (fuzzyData) {
+          return NextResponse.json({ profile: fuzzyData })
+        }
+      }
+
+      // Also try matching by phone number or name
+      if (citizenId.startsWith('+') || /^\d{10,}$/.test(citizenId)) {
+        const { data: phoneData } = await supabase
+          .from('health_profiles')
+          .select('*')
+          .eq('phone_number', citizenId)
+          .maybeSingle()
+
+        if (phoneData) {
+          return NextResponse.json({ profile: phoneData })
+        }
+      }
     }
 
-    const { data, error } = await query.maybeSingle()
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Health profile fetch error:', error)
-      return NextResponse.json({ error: 'Failed to fetch health profile' }, { status: 500 })
-    }
-
-    return NextResponse.json({ profile: data || null })
+    return NextResponse.json({ profile: null })
   } catch (error) {
     console.error('Health profile error:', error)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })

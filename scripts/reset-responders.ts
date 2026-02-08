@@ -2,17 +2,23 @@ import { createClient } from '@supabase/supabase-js'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-// Load environment variables from .env.local
+// Load environment variables from .env or .env.local
 try {
-  const envContent = readFileSync(join(process.cwd(), '.env.local'), 'utf-8')
-  envContent.split('\n').forEach(line => {
-    const match = line.match(/^([^=]+)=(.*)$/)
-    if (match) {
-      process.env[match[1].trim()] = match[2].trim()
-    }
-  })
+  const envFiles = ['.env.local', '.env']
+  for (const envFile of envFiles) {
+    try {
+      const envContent = readFileSync(join(process.cwd(), envFile), 'utf-8')
+      envContent.split('\n').forEach(line => {
+        const match = line.match(/^([^=]+)=(.*)$/)
+        if (match) {
+          process.env[match[1].trim()] = match[2].trim()
+        }
+      })
+      break
+    } catch {}
+  }
 } catch (e) {
-  console.log('⚠️  Could not load .env.local, using existing env vars')
+  console.log('Could not load env files, using existing env vars')
 }
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!

@@ -118,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const signUp = async (email: string, password: string, role: UserRole, fullName: string): Promise<{ error?: string }> => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -126,6 +126,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
     })
     if (error) return { error: error.message }
+
+    // Manually create profile as fallback (in case DB trigger doesn't exist)
+    if (data.user) {
+      try {
+        await (supabase as any).from('profiles').upsert({
+          id: data.user.id,
+          email,
+          role,
+          full_name: fullName,
+        }, { onConflict: 'id' })
+      } catch (profileErr) {
+        console.warn('Profile auto-create failed (trigger may handle it):', profileErr)
+      }
+      // Set profile immediately so user doesn't have to re-login
+      setProfile({ id: data.user.id, email, role, fullName })
+    }
     return {}
   }
 

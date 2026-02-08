@@ -841,10 +841,10 @@ function DispatchContent() {
                     )}
                   </div>
 
-                  {/* Patient Health Card */}
-                  {selected.citizenId && (
+                  {/* Patient Health Card — show if citizen ID available, or try session ID */}
+                  {(selected.citizenId || selected.id) && (
                     <div className="p-2.5 border-t border-slate-200/60">
-                      <PatientHealthCard citizenId={selected.citizenId} className="" />
+                      <PatientHealthCard citizenId={selected.citizenId || selected.id} className="" />
                     </div>
                   )}
 

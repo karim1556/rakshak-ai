@@ -56,11 +56,31 @@ export async function POST() {
       if (error) {
         // Check if user already exists
         if (error.message?.includes('already') || error.status === 422) {
-          results.push({ email: account.email, status: 'already_exists' })
+          // Try to find existing user and ensure profile exists
+          const { data: users } = await supabaseAdmin.auth.admin.listUsers()
+          const existingUser = users?.users?.find(u => u.email === account.email)
+          if (existingUser) {
+            await supabaseAdmin.from('profiles').upsert({
+              id: existingUser.id,
+              email: account.email,
+              role: account.role,
+              full_name: account.full_name,
+            }, { onConflict: 'id' })
+          }
+          results.push({ email: account.email, status: 'already_exists', id: existingUser?.id })
         } else {
           results.push({ email: account.email, status: 'error', error: error.message })
         }
       } else {
+        // Manually insert profile (in case DB trigger doesn't exist)
+        if (data.user) {
+          await supabaseAdmin.from('profiles').upsert({
+            id: data.user.id,
+            email: account.email,
+            role: account.role,
+            full_name: account.full_name,
+          }, { onConflict: 'id' })
+        }
         results.push({ email: account.email, status: 'created', id: data.user?.id })
       }
     }

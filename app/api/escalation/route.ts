@@ -15,30 +15,47 @@ export async function GET() {
   }
 
   // Transform DB rows to match frontend shape
-  const sessions = (data || []).map((row: any) => ({
-    id: row.id,
-    type: row.type,
-    severity: row.severity,
-    summary: row.summary,
-    status: row.status,
-    location: row.location_address ? {
-      address: row.location_address,
-      lat: row.location_lat ? Number(row.location_lat) : undefined,
-      lng: row.location_lng ? Number(row.location_lng) : undefined,
-    } : undefined,
-    messages: row.messages || [],
-    steps: row.steps || [],
-    assignedResponder: row.assigned_responder,
-    escalatedAt: new Date(row.escalated_at).getTime(),
-    language: row.language,
-    imageSnapshot: row.image_snapshot,
-    qaReport: row.qa_report,
-    spamVerdict: row.spam_verdict,
-    // Citizen identity
-    citizenId: row.citizen_identifier || null,
-    citizenName: row.citizen_name || null,
-    citizenPhone: row.citizen_phone || null,
-  }))
+  const sessions = (data || []).map((row: any) => {
+    // Try to get citizen info from columns first, then from messages metadata
+    let citizenId = row.citizen_identifier || null
+    let citizenName = row.citizen_name || null
+    let citizenPhone = row.citizen_phone || null
+
+    // Fallback: check messages array for embedded citizen metadata
+    if (!citizenId && Array.isArray(row.messages)) {
+      const meta = row.messages.find((m: any) => m.role === '_citizen_meta')
+      if (meta) {
+        citizenId = meta.citizenId || null
+        citizenName = meta.citizenName || null
+        citizenPhone = meta.citizenPhone || null
+      }
+    }
+
+    return {
+      id: row.id,
+      type: row.type,
+      severity: row.severity,
+      summary: row.summary,
+      status: row.status,
+      location: row.location_address ? {
+        address: row.location_address,
+        lat: row.location_lat ? Number(row.location_lat) : undefined,
+        lng: row.location_lng ? Number(row.location_lng) : undefined,
+      } : undefined,
+      messages: (row.messages || []).filter((m: any) => m.role !== '_citizen_meta'),
+      steps: row.steps || [],
+      assignedResponder: row.assigned_responder,
+      escalatedAt: new Date(row.escalated_at).getTime(),
+      language: row.language,
+      imageSnapshot: row.image_snapshot,
+      qaReport: row.qa_report,
+      spamVerdict: row.spam_verdict,
+      dispatchNotes: row.dispatch_notes,
+      citizenId,
+      citizenName,
+      citizenPhone,
+    }
+  })
 
   return NextResponse.json({ sessions })
 }
@@ -66,6 +83,17 @@ export async function POST(req: NextRequest) {
       requiresVerification: guard.verdict.requiresVerification,
     } : null
 
+    // Embed citizen info as metadata in messages array so it survives even without citizen columns
+    const messagesWithMeta = [...(session.messages || [])]
+    if (session.citizenId || session.citizenName || session.citizenPhone) {
+      messagesWithMeta.push({
+        role: '_citizen_meta',
+        citizenId: session.citizenId || null,
+        citizenName: session.citizenName || null,
+        citizenPhone: session.citizenPhone || null,
+      })
+    }
+
     const { error } = await supabase.from('escalated_sessions').upsert({
       id: session.id,
       type: session.type || 'other',
@@ -75,22 +103,45 @@ export async function POST(req: NextRequest) {
       location_lat: session.location?.lat || null,
       location_lng: session.location?.lng || null,
       location_address: session.location?.address || null,
-      messages: session.messages || [],
+      messages: messagesWithMeta,
       steps: session.steps || [],
       priority: session.severity === 'CRITICAL' ? 1 : session.severity === 'HIGH' ? 2 : 3,
       language: session.language || 'en',
       image_snapshot: session.imageSnapshot || null,
-      // Citizen identity
       citizen_identifier: session.citizenId || null,
       citizen_name: session.citizenName || null,
       citizen_phone: session.citizenPhone || null,
-      escalated_at: new Date().toISOString(),
       spam_verdict: spamMetadata,
+      escalated_at: new Date().toISOString(),
     })
 
     if (error) {
-      console.error('Insert error:', error)
-      throw error
+      // If any columns don't exist, retry with absolute minimum fields
+      if (error.code === 'PGRST204' || error.message?.includes('column') || error.message?.includes('schema cache')) {
+        console.warn('Schema mismatch detected, retrying with core fields only...')
+        const { error: retryError } = await supabase.from('escalated_sessions').upsert({
+          id: session.id,
+          type: session.type || 'other',
+          severity: session.severity || 'MEDIUM',
+          summary: session.summary || 'Emergency',
+          status: 'escalated',
+          location_lat: session.location?.lat || null,
+          location_lng: session.location?.lng || null,
+          location_address: session.location?.address || null,
+          messages: messagesWithMeta,
+          steps: session.steps || [],
+          priority: session.severity === 'CRITICAL' ? 1 : session.severity === 'HIGH' ? 2 : 3,
+          language: session.language || 'en',
+          escalated_at: new Date().toISOString(),
+        })
+        if (retryError) {
+          console.error('Retry insert error:', retryError)
+          throw retryError
+        }
+      } else {
+        console.error('Insert error:', error)
+        throw error
+      }
     }
 
     // Also create incident in incidents table for department dashboards
@@ -111,11 +162,10 @@ export async function POST(req: NextRequest) {
       location_lng: session.location?.lng || null,
       location_address: session.location?.address || null,
       reported_by: session.id,
-      // Citizen identity
+      language: session.language || 'en',
       citizen_identifier: session.citizenId || null,
       citizen_name: session.citizenName || null,
       citizen_phone: session.citizenPhone || null,
-      language: session.language || 'en',
     }).select('id').single()
 
     if (incError) {

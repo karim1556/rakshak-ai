@@ -72,6 +72,9 @@ export default function EmergencyPage() {
     updateSessionInfo,
     escalateToDispatch,
   } = useEmergencyStore()
+
+  // Track previous language for detecting switches  
+  const prevLanguageRef = useRef('en')
   
   const [state, setState] = useState<ConversationState>('idle')
   const [waveformBars, setWaveformBars] = useState<number[]>(Array(20).fill(0.2))
@@ -92,6 +95,47 @@ export default function EmergencyPage() {
   const [selectedLanguage, setSelectedLanguage] = useState('en')
   const [showLanguagePicker, setShowLanguagePicker] = useState(false)
   const languageRef = useRef('en')
+
+  // Translate steps when language changes
+  useEffect(() => {
+    if (prevLanguageRef.current === selectedLanguage) return
+    const oldLang = prevLanguageRef.current
+    prevLanguageRef.current = selectedLanguage
+
+    const steps = session?.steps
+    if (!steps || steps.length === 0) return
+
+    const LANG_NAMES: Record<string, string> = {
+      en: 'English', hi: 'Hindi', mr: 'Marathi', ta: 'Tamil', te: 'Telugu',
+      kn: 'Kannada', ml: 'Malayalam', gu: 'Gujarati', bn: 'Bengali',
+      pa: 'Punjabi', ur: 'Urdu', multi: 'English',
+    }
+    const targetLang = LANG_NAMES[selectedLanguage] || 'English'
+    const stepTexts = steps.map(s => s.text)
+
+    fetch('/api/emergency-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: session?.id,
+        message: `[SYSTEM: Translate these action steps to ${targetLang}. Return ONLY translated steps, no conversation response needed.]`,
+        conversationHistory: [{ role: 'user', content: `Translate to ${targetLang}: ${JSON.stringify(stepTexts)}` }],
+        currentSteps: [],
+        language: selectedLanguage,
+      }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.steps?.length) {
+          const translatedSteps = steps.map((s, i) => ({
+            ...s,
+            text: data.steps[i]?.text || s.text,
+          }))
+          useEmergencyStore.getState().updateSteps(translatedSteps)
+        }
+      })
+      .catch(() => {}) // non-blocking
+  }, [selectedLanguage])
 
   // SOS state
   const [sosCountdown, setSosCountdown] = useState<number | null>(null)
@@ -209,11 +253,23 @@ export default function EmergencyPage() {
     return () => { supabase.removeChannel(channel) }
   }, [session?.id])
 
-  // SOS — triple-tap anywhere triggers silent panic
-  const handleSOSTap = useCallback(() => {
+  // SOS — triple-tap on background triggers silent panic
+  // Only count taps on non-interactive areas (not buttons, inputs, dropdowns)
+  const handleSOSTap = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+    // Ignore clicks on interactive elements
+    if (
+      target.closest('button') ||
+      target.closest('a') ||
+      target.closest('input') ||
+      target.closest('select') ||
+      target.closest('[role="button"]') ||
+      target.closest('[data-no-sos]')
+    ) return
+
     const now = Date.now()
-    sosTapRef.current = [...sosTapRef.current.filter(t => now - t < 1000), now]
-    if (sosTapRef.current.length >= 3) {
+    sosTapRef.current = [...sosTapRef.current.filter(t => now - t < 800), now]
+    if (sosTapRef.current.length >= 5) {
       sosTapRef.current = []
       triggerSOS()
     }
@@ -827,7 +883,7 @@ export default function EmergencyPage() {
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[300px] bg-gradient-to-b from-indigo-100/40 via-violet-50/20 to-transparent rounded-full blur-3xl" />
         
         {/* Header */}
-        <header className="relative z-10 p-4 flex items-center justify-between border-b border-slate-200/60 bg-white/60 backdrop-blur-sm">
+        <header className="relative z-20 p-4 flex items-center justify-between border-b border-slate-200/60 bg-white/60 backdrop-blur-sm">
           <button onClick={handleEndSession} className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all">
             <X className="h-5 w-5 text-slate-500" />
           </button>
@@ -854,9 +910,12 @@ export default function EmergencyPage() {
           
           <div className="flex items-center gap-2">
             {/* Language Selector */}
-            <div className="relative">
+            <div className="relative" data-no-sos>
               <button 
-                onClick={() => setShowLanguagePicker(!showLanguagePicker)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowLanguagePicker(!showLanguagePicker)
+                }}
                 className="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all flex items-center gap-1.5"
               >
                 <Globe className="h-4 w-4 text-slate-500" />
@@ -866,11 +925,12 @@ export default function EmergencyPage() {
               </button>
               
               {showLanguagePicker && (
-                <div className="absolute right-0 top-12 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50 w-48 max-h-72 overflow-y-auto">
+                <div className="absolute right-0 top-12 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100] w-48 max-h-72 overflow-y-auto" data-no-sos>
                   {LANGUAGES.map((lang) => (
                     <button
                       key={lang.code}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation()
                         setSelectedLanguage(lang.code)
                         languageRef.current = lang.code
                         setShowLanguagePicker(false)
@@ -1077,7 +1137,7 @@ export default function EmergencyPage() {
              state === 'speaking' ? 'Speaking...' :
              cameraEnabled ? 'Hold mic to talk — Tap camera to share view' : 'Hold to talk'}
           </p>
-          <p className="text-center text-[10px] text-slate-400 mt-2">Triple-tap anywhere for silent SOS</p>
+          <p className="text-center text-[10px] text-slate-400 mt-2">Tap background 5 times for silent SOS</p>
         </div>
 
         {/* Escalated / Dispatch Call Banner */}

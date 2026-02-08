@@ -64,6 +64,7 @@ interface EmergencyStore {
   addMessage: (role: Message['role'], content: string, audioUrl?: string) => void
   addStep: (text: string, imageUrl?: string) => void
   completeStep: (stepId: string) => void
+  updateSteps: (steps: EmergencyStep[]) => void
   
   updateSessionInfo: (info: Partial<Pick<EmergencySession, 'type' | 'severity' | 'summary' | 'location' | 'risks' | 'tacticalAdvice' | 'victims'>>) => void
   
@@ -173,6 +174,12 @@ export const useEmergencyStore = create<EmergencyStore>()(
             steps: [...session.steps, newStep],
           },
         })
+      },
+      
+      updateSteps: (steps: EmergencyStep[]) => {
+        const { session } = get()
+        if (!session) return
+        set({ session: { ...session, steps } })
       },
       
       completeStep: (stepId) => {

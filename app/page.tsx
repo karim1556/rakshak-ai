@@ -2,10 +2,12 @@
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Mic, Shield, Phone, Heart, Flame, ArrowRight, Radio, UserPlus } from 'lucide-react'
+import { Mic, Shield, Phone, Heart, Flame, ArrowRight, Radio, UserPlus, LogOut } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 
 export default function HomePage() {
   const router = useRouter()
+  const { user, profile, signOut, isLoading, isAuthenticated } = useAuth()
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 text-slate-900 flex flex-col">
@@ -18,9 +20,21 @@ export default function HomePage() {
             </div>
             <span className="font-bold text-base tracking-tight">Rakshak AI</span>
           </div>
-          <Link href="/login" className="text-sm text-slate-500 hover:text-indigo-600 transition-colors flex items-center gap-1">
-            Responder Login <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+          {isLoading ? (
+            <div className="w-20 h-5 bg-slate-200 animate-pulse rounded" />
+          ) : isAuthenticated ? (
+            <button
+              onClick={signOut}
+              className="text-sm text-slate-500 hover:text-red-600 transition-colors flex items-center gap-1.5"
+            >
+              <span className="hidden sm:inline">{profile?.fullName || user?.email || 'User'}</span>
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <Link href="/login" className="text-sm text-slate-500 hover:text-indigo-600 transition-colors flex items-center gap-1">
+              Login <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          )}
         </div>
       </header>
 

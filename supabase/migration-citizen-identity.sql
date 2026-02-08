@@ -5,6 +5,7 @@
 ALTER TABLE escalated_sessions ADD COLUMN IF NOT EXISTS citizen_identifier TEXT;
 ALTER TABLE escalated_sessions ADD COLUMN IF NOT EXISTS citizen_name TEXT;
 ALTER TABLE escalated_sessions ADD COLUMN IF NOT EXISTS citizen_phone TEXT;
+ALTER TABLE escalated_sessions ADD COLUMN IF NOT EXISTS spam_verdict JSONB;
 
 -- Add citizen identity columns to incidents
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS citizen_identifier TEXT;
